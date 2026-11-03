@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cram Arcade</title>
+  <meta name="description" content="Paste your notes or type a topic and get AI-made flashcards, a quiz, and a matching game.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=JetBrains+Mono:wght@500&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <h1 class="logo">Cram<span>Arcade</span></h1>
+      <p class="tagline">Turn notes into flashcards, a quiz, and a game.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <form id="make-form" class="maker">
+      <label for="source" class="label">Paste your notes or type a topic</label>
+      <textarea id="source" rows="4" maxlength="8000" placeholder="e.g. &quot;Ohm's law and series vs parallel circuits&quot; or paste a page of class notes"></textarea>
+      <div class="maker-row">
+        <span id="char-count" class="mono muted">0 / 8000</span>
+        <button id="make-btn" class="btn btn-primary" type="submit">Make my study set</button>
+      </div>
+      <p id="status" class="status" role="status"></p>
+    </form>
+
+    <section class="set" aria-labelledby="set-title">
+      <div class="set-head">
+        <div>
+          <p class="eyebrow" id="set-kind">Example set</p>
+          <h2 id="set-title">Study set</h2>
+        </div>
+        <nav class="tabs" role="tablist">
+          <button role="tab" id="tab-cards" class="tab" aria-selected="true" data-view="cards">Flashcards</button>
+          <button role="tab" id="tab-quiz" class="tab" aria-selected="false" data-view="quiz">Quiz</button>
+          <button role="tab" id="tab-match" class="tab" aria-selected="false" data-view="match">Match game</button>
+        </nav>
+      </div>
+
+      <!-- Flashcards -->
+      <div id="view-cards" class="view">
+        <div class="card-stage">
+          <button id="flashcard" class="flashcard" aria-live="polite">
+            <span class="card-inner">
+              <span class="card-face card-front"><span class="face-label">Term</span><span id="card-front"></span></span>
+              <span class="card-face card-back"><span class="face-label">Answer</span><span id="card-back"></span></span>
+            </span>
+          </button>
+        </div>
+        <p class="hint muted">Tap the card or press Space to flip. Arrow keys move between cards.</p>
+        <div class="card-controls">
+          <button id="prev-card" class="btn" type="button">Previous</button>
+          <span id="card-pos" class="mono"></span>
+          <button id="next-card" class="btn" type="button">Next</button>
+        </div>
+        <div class="card-controls">
+          <button id="learning-btn" class="btn btn-soft" type="button">Still learning</button>
+          <button id="known-btn" class="btn btn-good" type="button">Got it</button>
+          <button id="shuffle-btn" class="btn" type="button">Shuffle</button>
+        </div>
+        <p class="tally mono"><span id="known-count">0</span> known · <span id="learning-count">0</span> still learning</p>
+      </div>
+
+      <!-- Quiz -->
+      <div id="view-quiz" class="view" hidden>
+        <div id="quiz-body"></div>
+      </div>
+
+      <!-- Match game -->
+      <div id="view-match" class="view" hidden>
+        <div class="match-bar">
+          <span class="mono">Time <strong id="match-time">0.0s</strong></span>
+          <span class="mono">Best <strong id="match-best">—</strong></span>
+          <button id="match-restart" class="btn" type="button">New round</button>
+        </div>
+        <p class="hint muted">Match each term with its answer. Wrong picks add 2 seconds.</p>
+        <div id="match-grid" class="match-grid"></div>
+        <p id="match-done" class="match-done" hidden></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap foot muted">
+    Built by me with help from Claude. Study sets are AI-generated, so double-check anything important.
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
