@@ -139,7 +139,42 @@ offline (study sets you've saved still play with no internet).
 `manifest.webmanifest` describes the app, `sw.js` handles offline use, and the icons are in
 `icons/`. When you change the app, bump `VERSION` in `sw.js` so installed copies refresh.
 
+### The Android app (Capacitor)
+
+The same code also builds a real Android app with [Capacitor](https://capacitorjs.com).
+The page files ship inside the app (so it opens instantly and works offline), and the
+app calls the live server at cram-arcade.vercel.app for AI sets, crews and classes.
+On top of the website, the app adds:
+
+- **Phone notifications that arrive even when the app is closed:** each planned study
+  session, 4 PM the day before a test, and 7 AM on test day. Tapping one opens the right game.
+- **Vibration** in the games (hits, misses, wins).
+- **Android's back button** closes panels before leaving the app.
+
+Signing in inside the app is coming next (Google blocks its web sign-in inside apps).
+
+**First-time setup** (needs [Node.js](https://nodejs.org) 22+ and
+[Android Studio](https://developer.android.com/studio)):
+
+```
+npm install
+npm run android:setup
+npm run android
+```
+
+`android:setup` creates the `android/` folder, the app icons and the notification icon
+(run it once). `npm run android` copies your latest changes into the app and opens Android
+Studio. Plug in your phone with USB debugging on (or use an emulator) and press **Run ▶**.
+
+After changing `index.html`, `app.js` or `style.css`, run `npm run android` again. Changes to
+`api/` only need a push to GitHub, because the app uses the live server.
+
+The source images for the icon and splash screen are in `assets/`.
+
 ### Publishing on Google Play
+
+These steps package the website version with PWABuilder. For the Capacitor app, build the
+`.aab` in Android Studio instead (**Build → Generate Signed App Bundle**) and skip steps 3–4.
 
 1. **Put the site online** on Vercel first (see Deploy). Google Play needs a real https link.
 2. **Create a Play Console account** at [play.google.com/console](https://play.google.com/console):

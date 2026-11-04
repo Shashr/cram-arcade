@@ -1,6 +1,14 @@
 // Cram Arcade © 2026 Shashank J Reddy. All rights reserved. Not licensed for reuse; see LICENSE.
 // Cram Arcade front end: flashcards, quiz, and a matching game.
 
+// In the Android app (Capacitor) the page runs from the phone itself, so server calls
+// go to the live site. On the website they stay on the same site.
+const NATIVE = !!window.Capacitor?.isNativePlatform?.();
+const API = NATIVE ? "https://cram-arcade.vercel.app" : "";
+const PHONE = NATIVE ? window.Capacitor.Plugins : {};
+const SITE = NATIVE ? API : location.origin; // the public address, for links people share
+if (NATIVE) document.documentElement.classList.add("native");
+
 const EXAMPLE_SET = {
   title: "Digital logic basics",
   cards: [
@@ -79,6 +87,25 @@ const fx = {
     } catch { /* audio not available */ }
   },
 };
+
+// Android app: a small buzz to go with the game sounds (works even with sound off).
+if (NATIVE && PHONE.Haptics) {
+  const BUZZ = {
+    good: () => PHONE.Haptics.impact({ style: "LIGHT" }),
+    pair: () => PHONE.Haptics.impact({ style: "LIGHT" }),
+    flip: () => PHONE.Haptics.selectionChanged?.(),
+    bad: () => PHONE.Haptics.impact({ style: "HEAVY" }),
+    hurt: () => PHONE.Haptics.vibrate({ duration: 220 }),
+    enrage: () => PHONE.Haptics.vibrate({ duration: 400 }),
+    win: () => PHONE.Haptics.notification({ type: "SUCCESS" }),
+    lose: () => PHONE.Haptics.notification({ type: "ERROR" }),
+  };
+  const playSound = fx.play.bind(fx);
+  fx.play = (name) => {
+    playSound(name);
+    try { BUZZ[name]?.()?.catch?.(() => {}); } catch { /* no vibration motor */ }
+  };
+}
 function renderSoundBtn() {
   $("sound-btn").textContent = fx.on ? "Sound: on" : "Sound: off";
   $("sound-btn").setAttribute("aria-pressed", String(fx.on));
@@ -365,6 +392,7 @@ const player = loadPlayer();
 function savePlayer() {
   safeSet(PLAYER_KEY, JSON.stringify(player));
   scheduleSync(); // also save to the player's account if they're signed in
+  schedulePhoneReminders(); // Android app: keep the phone's notifications in step
 }
 safeSet(PLAYER_KEY, JSON.stringify(player));
 
@@ -418,9 +446,9 @@ function award(base, reason, game, { win = false } = {}) {
 
 /* ----- Talking to the crew leaderboard ----- */
 async function crewApi(body) {
-  const res = body ? await fetch("/api/crew", {
+  const res = body ? await fetch(API + "/api/crew", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
-  }) : await fetch(`/api/crew?code=${encodeURIComponent(player.crew.code)}`);
+  }) : await fetch(`${API}/api/crew?code=${encodeURIComponent(player.crew.code)}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Couldn't reach the leaderboard. Check your connection.");
   return data;
@@ -672,7 +700,7 @@ try { account.profile = JSON.parse(safeGet("cram-profile") || "null"); } catch {
 async function getConfig() {
   if (account.config) return account.config;
   try {
-    const res = await fetch("/api/config");
+    const res = await fetch(API + "/api/config");
     account.config = res.ok ? await res.json() : {};
   } catch {
     account.config = {};
@@ -760,8 +788,8 @@ async function accountApi(body) {
   const headers = { "content-type": "application/json" };
   if (session) headers.authorization = `Bearer ${session}`;
   const res = body
-    ? await fetch("/api/account", { method: "POST", headers, body: JSON.stringify(body) })
-    : await fetch("/api/account", { headers });
+    ? await fetch(API + "/api/account", { method: "POST", headers, body: JSON.stringify(body) })
+    : await fetch(API + "/api/account", { headers });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && !String(body?.action || "").startsWith("signin")) signOut(true);
   if (!res.ok) throw new Error(data.error || "Couldn't reach your account.");
@@ -901,6 +929,11 @@ async function renderAccount() {
     out.addEventListener("click", () => signOut());
     row.append(sync, out);
     body.append(row);
+    return;
+  }
+  if (NATIVE) {
+    // Google doesn't allow its web sign-in inside apps; the app gets its own sign-in next.
+    body.append(el("p", "", "Signing in from the Android app is coming in the next update. Until then, your tickets, study sets and crew are saved on this phone."));
     return;
   }
   body.append(el("p", "", "Sign in to keep your tickets, study sets and crew on every device. Everything you've done on this device comes with you."));
@@ -1103,7 +1136,7 @@ function studyPlanFile(test) {
       `DTSTART:${fmt(start)}`,
       `DTEND:${fmt(end)}`,
       `SUMMARY:${escape(`Study for ${test.name}`)}`,
-      `DESCRIPTION:${escape(`${left === 1 ? "Last session: beat the boss!" : `${left} days to go.`} ${location.origin}`)}`,
+      `DESCRIPTION:${escape(`${left === 1 ? "Last session: beat the boss!" : `${left} days to go.`} ${SITE}`)}`,
       "BEGIN:VALARM", "ACTION:DISPLAY", `DESCRIPTION:${escape(`Study for ${test.name}`)}`, "TRIGGER:-PT10M", "END:VALARM",
       "END:VEVENT",
     );
@@ -1199,7 +1232,7 @@ function renderTests() {
       const ics = el("button", "link-btn", "Add them to Outlook or my phone's calendar");
       ics.type = "button";
       ics.addEventListener("click", () => studyPlanFile(test));
-      line.append(ics);
+      if (!NATIVE) line.append(ics); // the Android app sends its own phone notifications instead
       info.append(line);
     }
     const remove = el("button", "test-remove", "×");
@@ -1541,12 +1574,155 @@ $("reminder-snooze").addEventListener("click", () => {
 
 function renderNotifyBtn() {
   const btn = $("notify-btn");
+  if (NATIVE) {
+    // Shown until the phone allows notifications.
+    PHONE.LocalNotifications?.checkPermissions()
+      .then((p) => { btn.hidden = p.display === "granted"; })
+      .catch(() => { btn.hidden = true; });
+    return;
+  }
   btn.hidden = !("Notification" in window) || Notification.permission !== "default";
 }
 $("notify-btn").addEventListener("click", async () => {
-  try { await Notification.requestPermission(); } catch { /* ignore */ }
+  if (NATIVE) {
+    await askPhoneReminders();
+  } else {
+    try { await Notification.requestPermission(); } catch { /* ignore */ }
+  }
   renderNotifyBtn();
 });
+
+/* ----- Phone notifications (Android app only) -----
+   The website can only remind you while it's open. The Android app hands the schedule
+   to the phone, so reminders arrive even when the app is closed:
+   - each planned study session, at its time
+   - 4 PM the day before a test, and 7 AM on the morning of it */
+var phoneReminderTimer = null; // var: savePlayer() can run before this line does
+var phoneRemindersReady = null;
+const REMIND_EVE = [16, 0];
+const REMIND_MORNING = [7, 0];
+
+function reminderId(key) {
+  let h = 0;
+  for (const c of key) h = (h * 31 + c.charCodeAt(0)) | 0;
+  return Math.abs(h) % 2_000_000_000 + 1;
+}
+
+function phoneReminderList() {
+  const now = Date.now();
+  const soon = now + 60 * 86400_000;
+  const list = [];
+  for (const s of player.sessions || []) {
+    const at = sessionTime(s);
+    if (s.done || at <= now || at > soon) continue;
+    list.push({
+      id: reminderId(`session:${s.id}`),
+      title: "Study time!",
+      body: `${sessionTitle(s)}. Finish it for ${SESSION_TICKETS} tickets.`,
+      at, extra: { kind: "session", id: s.id },
+    });
+  }
+  for (const t of upcomingTests()) {
+    const [y, m, d] = t.date.split("-").map(Number);
+    const eve = new Date(y, m - 1, d - 1, ...REMIND_EVE);
+    const morning = new Date(y, m - 1, d, ...REMIND_MORNING);
+    if (eve > now && eve <= soon) {
+      list.push({
+        id: reminderId(`eve:${t.id}`), title: `${t.name} is tomorrow`,
+        body: t.setTitle ? "Beat the boss tonight and you're ready." : "Make a study set and beat the boss tonight.",
+        at: eve, extra: { kind: "test", id: t.id },
+      });
+    }
+    if (morning > now && morning <= soon) {
+      list.push({
+        id: reminderId(`morning:${t.id}`), title: `${t.name} is today`,
+        body: "One last boss fight to warm up?",
+        at: morning, extra: { kind: "test", id: t.id },
+      });
+    }
+  }
+  return list.sort((a, b) => a.at - b.at).slice(0, 50);
+}
+
+async function askPhoneReminders() {
+  const LN = PHONE.LocalNotifications;
+  if (!LN) return false;
+  try {
+    let p = await LN.checkPermissions();
+    if (p.display !== "granted") p = await LN.requestPermissions();
+    safeSet("cram-asked-notify", "yes");
+    if (p.display === "granted") await syncPhoneReminders();
+    return p.display === "granted";
+  } catch {
+    return false;
+  }
+}
+
+async function syncPhoneReminders() {
+  const LN = PHONE.LocalNotifications;
+  if (!LN) return;
+  phoneRemindersReady ||= LN.createChannel?.({
+    id: "study", name: "Study reminders", description: "Study sessions and upcoming tests",
+    importance: 4, vibration: true,
+  }).catch(() => {});
+  await phoneRemindersReady;
+  const list = phoneReminderList();
+  const perm = await LN.checkPermissions();
+  if (perm.display !== "granted") {
+    // Ask once, right after the first test is added, when it's clear why.
+    if (list.length && perm.display === "prompt" && safeGet("cram-asked-notify") !== "yes") await askPhoneReminders();
+    return;
+  }
+  const pending = await LN.getPending();
+  if (pending.notifications?.length) await LN.cancel({ notifications: pending.notifications.map((n) => ({ id: n.id })) });
+  if (!list.length) return;
+  await LN.schedule({
+    notifications: list.map((r) => ({
+      id: r.id, title: r.title, body: r.body, extra: r.extra, channelId: "study",
+      schedule: { at: r.at, allowWhileIdle: true },
+    })),
+  });
+}
+
+function schedulePhoneReminders() {
+  if (!NATIVE) return;
+  clearTimeout(phoneReminderTimer);
+  phoneReminderTimer = setTimeout(() => { syncPhoneReminders().catch(() => {}); }, 800);
+}
+
+function openTestReminder(test) {
+  const set = savedSets().find((x) => x.title === test.setTitle);
+  if (set) {
+    loadSet(set, set.kind);
+    showView("boss");
+    document.querySelector(".set").scrollIntoView({ behavior: "smooth", block: "start" });
+  } else {
+    studyFor({ testId: test.id });
+  }
+}
+
+if (NATIVE) {
+  // Tapping a notification opens the right game.
+  PHONE.LocalNotifications?.addListener("localNotificationActionPerformed", ({ notification }) => {
+    const extra = notification?.extra || {};
+    if (extra.kind === "session") {
+      const s = (player.sessions || []).find((x) => x.id === extra.id);
+      if (s) studyFor(s);
+    } else if (extra.kind === "test") {
+      const t = (player.tests || []).find((x) => x.id === extra.id);
+      if (t) openTestReminder(t);
+    }
+  });
+  // Android's back button closes an open panel first, then leaves the app.
+  PHONE.App?.addListener("backButton", () => {
+    const open = document.querySelector("dialog[open]");
+    if (open) { open.close(); return; }
+    if (!$("reminder-pop").hidden) { $("reminder-pop").hidden = true; return; }
+    PHONE.App.minimizeApp();
+  });
+  PHONE.App?.addListener("resume", () => { checkReminders(); schedulePhoneReminders(); });
+  schedulePhoneReminders();
+}
 
 /* ----- Month calendar ----- */
 const cal = { month: null, selected: null };
@@ -1680,8 +1856,8 @@ checkReminders();
 setInterval(checkReminders, 20_000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) checkReminders(); });
 getConfig().then((config) => {
-  $("cal-connect").hidden = !config.googleClientId;
-  $("cal-outlook").hidden = !config.microsoftClientId;
+  $("cal-connect").hidden = !config.googleClientId || NATIVE;
+  $("cal-outlook").hidden = !config.microsoftClientId || NATIVE;
   finishMicrosoftLogin();
   if (!config.googleClientId && !config.microsoftClientId) return;
   pullSync().then(() => { renderAccountChip(); });
@@ -1693,13 +1869,13 @@ $("cal-outlook").addEventListener("click", () => microsoftLogin("calendar"));
    Students join with the code and a first name; the assigned sets appear in their
    saved sets, and quiz, boss and flashcard results on those sets go to the teacher. */
 async function classApi(body) {
-  const res = await fetch("/api/classroom", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const res = await fetch(API + "/api/classroom", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Couldn't reach the classroom. Check your connection.");
   return data;
 }
 async function classInfo(code) {
-  const res = await fetch(`/api/classroom?code=${encodeURIComponent(code)}`);
+  const res = await fetch(`${API}/api/classroom?code=${encodeURIComponent(code)}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Couldn't reach the classroom.");
   return data;
@@ -2280,7 +2456,7 @@ function renderDashboard() {
   codeBox.append(copy);
   hero.append(names, codeBox);
   body.append(hero);
-  const joinLink = `${location.origin}/?class=${d.code}`;
+  const joinLink = `${SITE}/?class=${d.code}`;
   const share = el("div", "share-row");
   const teams = el("a", "btn teams-btn");
   teams.href = "https://teams.microsoft.com/share?" + new URLSearchParams({
@@ -3145,7 +3321,7 @@ $("make-form").addEventListener("submit", async (e) => {
   btn.textContent = "Making your set…";
   status.textContent = "Claude is writing your flashcards and quiz. This takes about 10 seconds.";
   try {
-    const res = await fetch("/api/generate", {
+    const res = await fetch(API + "/api/generate", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text }),
@@ -3170,7 +3346,7 @@ $("make-form").addEventListener("submit", async (e) => {
 /* ---------- Installable app ----------
    The service worker (sw.js) lets the app open offline. On Android/Chrome, the browser
    offers an install prompt, which we show as an "Install app" button. */
-if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+if (!NATIVE && "serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
   window.addEventListener("load", () => { navigator.serviceWorker.register("/sw.js").catch(() => {}); });
 }
 let installPrompt = null;

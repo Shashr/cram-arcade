@@ -14,6 +14,7 @@
 
 import crypto from "node:crypto";
 import { db } from "./_db.js";
+import { cors } from "./_cors.js";
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const MS_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID;
@@ -87,6 +88,7 @@ async function loadUser(sub) {
 }
 
 export default async function handler(req, res) {
+  if (cors(req, res)) return;
   if (!CLIENT_ID && !MS_CLIENT_ID) return res.status(503).json({ error: "Sign-in isn't set up on this site yet." });
   if (!SECRET) return res.status(500).json({ error: "The server is missing SESSION_SECRET." });
   try {

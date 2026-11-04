@@ -15,6 +15,7 @@
 // for friends; a public game would need the server to run the games itself.
 
 import { db } from "./_db.js";
+import { cors } from "./_cors.js";
 
 const KEEP_SECONDS = 60 * 60 * 24 * 180; // crews disappear after 180 days without activity
 const MAX_TICKETS_PER_REPORT = 400;
@@ -92,6 +93,7 @@ async function saveProfile(code, playerId, name, plate) {
 
 /* ---------- handler ---------- */
 export default async function handler(req, res) {
+  if (cors(req, res)) return;
   try {
     if (req.method === "GET") {
       const code = cleanCode(req.query?.code);

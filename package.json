@@ -1,13 +1,28 @@
 {
   "name": "cram-arcade",
   "version": "1.0.0",
+  "private": true,
   "description": "Turn notes or a topic into AI-made flashcards, a quiz, and a matching game.",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build:www": "node scripts/build-www.mjs",
+    "android:setup": "node scripts/build-www.mjs && npx cap add android && npx capacitor-assets generate --android && node scripts/android-extras.mjs && npx cap sync android",
+    "android": "node scripts/build-www.mjs && npx cap sync android && npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/haptics": "^8.0.0",
+    "@capacitor/local-notifications": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.0.0"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
-  "license": "MIT"
+  "license": "UNLICENSED"
 }
