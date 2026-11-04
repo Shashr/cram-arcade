@@ -827,10 +827,34 @@ function signOut(expired = false) {
   if ($("account").open) renderAccount();
 }
 
+// Official sign-in marks, used on the sign-in buttons and next to your name once signed in.
+const LOGOS = {
+  microsoft: `<svg class="brand-logo" viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>`,
+  google: `<svg class="brand-logo" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>`,
+};
+
 function renderAccountChip() {
   const chip = $("open-account");
-  chip.textContent = account.profile ? (account.profile.name || "Account") : "Sign in";
+  chip.innerHTML = "";
+  if (account.profile) {
+    if (LOGOS[account.profile.provider]) chip.insertAdjacentHTML("beforeend", LOGOS[account.profile.provider]);
+    chip.append(el("span", "", account.profile.name || "Account"));
+    chip.setAttribute("aria-label", `Your account: ${account.profile.name || ""}, signed in with ${account.profile.provider === "microsoft" ? "Microsoft" : "Google"}`);
+  } else {
+    chip.textContent = "Sign in";
+    chip.removeAttribute("aria-label");
+  }
   chip.classList.toggle("signed-in", !!account.profile);
+}
+
+// A sign-in button with the provider's logo. Without setup it shows as a disabled preview.
+function brandButton(provider, enabled) {
+  const b = el("button", `brand-btn brand-${provider}`);
+  b.type = "button";
+  b.id = provider === "microsoft" ? "ms-signin" : "google-preview";
+  b.innerHTML = `${LOGOS[provider]}<span>Sign in with ${provider === "microsoft" ? "Microsoft" : "Google"}</span>`;
+  b.disabled = !enabled;
+  return b;
 }
 
 async function renderAccount() {
@@ -838,7 +862,10 @@ async function renderAccount() {
   const config = await getConfig();
   body.innerHTML = "";
   if (!config.googleClientId && !config.microsoftClientId) {
-    body.append(el("p", "", "Sign-in isn't set up on this site yet."));
+    body.append(el("p", "", "Sign-in isn't switched on for this site yet. Everything still works and saves on this device."));
+    const preview = el("div", "signin-buttons");
+    preview.append(brandButton("microsoft", false), brandButton("google", false));
+    body.append(preview);
     body.append(el("p", "muted small", "If this is your site: add MICROSOFT_CLIENT_ID and/or GOOGLE_CLIENT_ID, plus SESSION_SECRET (see the README)."));
     return;
   }
@@ -854,7 +881,10 @@ async function renderAccount() {
       avatar.append(img);
     }
     const names = el("div");
-    names.append(el("strong", "", account.profile.name || "Signed in"), el("span", "muted small", account.profile.email || ""));
+    const via = el("span", "signed-via small");
+    if (LOGOS[account.profile.provider]) via.insertAdjacentHTML("beforeend", LOGOS[account.profile.provider]);
+    via.append(account.profile.provider === "microsoft" ? "Signed in with Microsoft" : account.profile.provider === "google" ? "Signed in with Google" : "Signed in");
+    names.append(el("strong", "", account.profile.name || "Signed in"), el("span", "muted small", account.profile.email || ""), via);
     who.append(avatar, names);
     body.append(who);
     body.append(el("p", "", "Your tickets, saved sets, tests and records sync to your account, so they're the same on every device."));
@@ -877,10 +907,7 @@ async function renderAccount() {
   const buttons = el("div", "signin-buttons");
   body.append(buttons);
   if (config.microsoftClientId) {
-    const ms = el("button", "ms-btn");
-    ms.type = "button";
-    ms.id = "ms-signin";
-    ms.innerHTML = `<svg viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg><span>Sign in with Microsoft</span>`;
+    const ms = brandButton("microsoft", true);
     ms.addEventListener("click", () => microsoftLogin("signin"));
     buttons.append(ms);
   }
