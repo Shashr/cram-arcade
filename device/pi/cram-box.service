@@ -1,0 +1,15 @@
+[Unit]
+Description=Cram Box study device
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/cram-arcade/device/pi
+# Change the link below to your Cram Arcade website:
+ExecStart=/usr/bin/python3 /home/pi/cram-arcade/device/pi/cram_box.py --api https://YOUR-SITE.vercel.app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

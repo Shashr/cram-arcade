@@ -38,6 +38,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const content = await readFile(file);
     res.setHeader("content-type", types[path.extname(file)]);
+    res.setHeader("cache-control", "no-store"); // always show the newest version while developing
     res.end(content);
   } catch {
     res.status(404).end("Not found");

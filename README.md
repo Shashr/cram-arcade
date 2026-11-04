@@ -5,6 +5,14 @@ Paste your class notes or type a topic, and Cram Arcade uses AI (Claude) to turn
 - **Flashcards** you can flip, shuffle, and sort into "got it" and "still learning"
 - **A multiple-choice quiz** with explanations for every answer
 - **A timed matching game** that tracks your best time
+- **A boss battle**: your study set becomes a boss with a health bar. Right answers deal
+  damage (fast answers are critical hits, streaks build combos), wrong answers cost you a
+  heart, and the boss gets enraged at half health. Questions you miss come back mid-fight
+  and are listed for review at the end.
+- **Type your own set** for free (no AI): add cards one by one or paste a list
+  (`term - answer`, one per line; Quizlet exports work). A quiz is made from your cards.
+- **Saved sets**: every set you make is saved in your browser so you can come back to it.
+- Sound effects (with an on/off switch), confetti, and game-style animations.
 
 **Live site:** _add your Vercel link here_
 

@@ -4,46 +4,117 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cram Arcade</title>
-  <meta name="description" content="Paste your notes or type a topic and get AI-made flashcards, a quiz, and a matching game.">
+  <meta name="description" content="Turn your notes into flashcards, a quiz, a matching game, and a boss battle.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=JetBrains+Mono:wght@500&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bungee&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="top">
-    <div class="wrap">
-      <h1 class="logo">Cram<span>Arcade</span></h1>
-      <p class="tagline">Turn notes into flashcards, a quiz, and a game.</p>
+  <header class="top wrap">
+    <div class="marquee" aria-label="Cram Arcade">
+      <span class="bulbs" aria-hidden="true"></span>
+      <h1 class="logo"><span class="logo-cram">Cram</span><span class="logo-arcade">Arcade</span></h1>
     </div>
+    <p class="tagline">Turn your notes into games.</p>
+    <button id="sound-btn" class="chip-btn sound-btn" type="button" aria-pressed="true">Sound: on</button>
   </header>
 
   <main class="wrap">
-    <form id="make-form" class="maker">
-      <label for="source" class="label">Paste your notes or type a topic</label>
-      <textarea id="source" rows="4" maxlength="8000" placeholder="e.g. &quot;Ohm's law and series vs parallel circuits&quot; or paste a page of class notes"></textarea>
-      <div class="maker-row">
-        <span id="char-count" class="mono muted">0 / 8000</span>
-        <button id="make-btn" class="btn btn-primary" type="submit">Make my study set</button>
+    <section class="panel maker-wrap" aria-label="Make a study set">
+      <div class="switch mode-switch" role="tablist" aria-label="How to make a set">
+        <button role="tab" class="tab" aria-selected="true" data-mode="ai" type="button">Make it with AI</button>
+        <button role="tab" class="tab" aria-selected="false" data-mode="own" type="button">Type my own</button>
       </div>
-      <p id="status" class="status" role="status"></p>
-    </form>
+
+      <form id="make-form" class="maker">
+        <label for="source" class="label">Paste your notes or type a topic</label>
+        <textarea id="source" rows="4" maxlength="8000" placeholder="Ohm's law and series vs parallel circuits, or paste a page of class notes"></textarea>
+        <div class="maker-row">
+          <span id="char-count" class="muted small">0 / 8000</span>
+          <button id="make-btn" class="btn btn-primary" type="submit">Make my study set</button>
+        </div>
+        <p id="status" class="status" role="status"></p>
+      </form>
+
+      <form id="own-form" class="maker" hidden>
+        <label for="own-title" class="label">Set name</label>
+        <input id="own-title" class="text-input" maxlength="80" placeholder="Unit 3 vocab" autocomplete="off">
+        <div class="own-head">
+          <span class="label">Cards</span>
+          <span id="own-count" class="muted small"></span>
+        </div>
+        <div id="own-rows" class="own-rows"></div>
+        <div class="maker-row">
+          <button id="own-add" class="btn" type="button">Add a card</button>
+          <button id="own-paste-toggle" class="btn btn-quiet" type="button" aria-expanded="false">Paste a list</button>
+        </div>
+        <div id="own-paste" class="own-paste" hidden>
+          <label for="own-paste-text" class="muted small">One card per line, like “term - answer”. Quizlet exports work too.</label>
+          <textarea id="own-paste-text" rows="5" placeholder="Mitochondria - makes energy (ATP) for the cell&#10;Ribosome - builds proteins"></textarea>
+          <button id="own-paste-add" class="btn" type="button">Add these cards</button>
+        </div>
+        <div class="maker-row">
+          <span class="muted small">Free, no AI needed. Add at least 4 cards.</span>
+          <button class="btn btn-primary" type="submit">Start studying</button>
+        </div>
+        <p id="own-status" class="status" role="status"></p>
+      </form>
+    </section>
+
+    <section id="saved" class="saved" hidden aria-labelledby="saved-title">
+      <h2 class="shelf-title" id="saved-title">Your saved sets</h2>
+      <div id="saved-list" class="saved-list"></div>
+    </section>
 
     <section class="set" aria-labelledby="set-title">
       <div class="set-head">
-        <div>
-          <p class="eyebrow" id="set-kind">Example set</p>
-          <h2 id="set-title">Study set</h2>
-        </div>
-        <nav class="tabs" role="tablist">
-          <button role="tab" id="tab-cards" class="tab" aria-selected="true" data-view="cards">Flashcards</button>
-          <button role="tab" id="tab-quiz" class="tab" aria-selected="false" data-view="quiz">Quiz</button>
-          <button role="tab" id="tab-match" class="tab" aria-selected="false" data-view="match">Match game</button>
-        </nav>
+        <p class="set-kind" id="set-kind">Example set</p>
+        <h2 id="set-title">Study set</h2>
       </div>
 
+      <nav class="games tabs" role="tablist" aria-label="Games">
+        <button role="tab" id="tab-cards" class="tab game game-cards" aria-selected="true" data-view="cards" type="button">
+          <svg class="game-art" viewBox="0 0 64 48" aria-hidden="true">
+            <rect class="art-fill-2" x="16" y="6" width="38" height="28" rx="4" transform="rotate(8 35 20)"/>
+            <rect class="art-fill" x="8" y="12" width="38" height="28" rx="4" transform="rotate(-6 27 26)"/>
+            <path class="art-ink" d="M23 21c0-3 2.5-5 5-5s5 2 5 4.5c0 3-4 3.5-4 7M29 32v.5" transform="rotate(-6 27 26)"/>
+          </svg>
+          <span class="game-name">Flashcards</span>
+          <span class="game-desc">Flip and sort</span>
+        </button>
+        <button role="tab" id="tab-quiz" class="tab game game-quiz" aria-selected="false" data-view="quiz" type="button">
+          <svg class="game-art" viewBox="0 0 64 48" aria-hidden="true">
+            <circle class="art-a" cx="16" cy="16" r="8"/><circle class="art-b" cx="40" cy="16" r="8"/>
+            <circle class="art-c" cx="16" cy="36" r="8"/><circle class="art-d" cx="40" cy="36" r="8"/>
+            <path class="art-ink" d="M36 36l3 3 6-7"/>
+          </svg>
+          <span class="game-name">Quiz</span>
+          <span class="game-desc">Pick A, B, C or D</span>
+        </button>
+        <button role="tab" id="tab-match" class="tab game game-match" aria-selected="false" data-view="match" type="button">
+          <svg class="game-art" viewBox="0 0 64 48" aria-hidden="true">
+            <rect class="art-fill" x="4" y="10" width="22" height="28" rx="4"/>
+            <rect class="art-fill-2" x="38" y="10" width="22" height="28" rx="4"/>
+            <path class="art-ink" d="M26 24h12M33 19l5 5-5 5"/>
+          </svg>
+          <span class="game-name">Match</span>
+          <span class="game-desc">Race the clock</span>
+        </button>
+        <button role="tab" id="tab-boss" class="tab game game-boss tab-boss" aria-selected="false" data-view="boss" type="button">
+          <svg class="game-art" viewBox="0 0 64 48" aria-hidden="true">
+            <path class="art-fill" d="M18 4h22l8 8v32H18z"/>
+            <path class="art-ink" d="M23 17l7 3M43 17l-7 3"/>
+            <circle class="art-eye" cx="27" cy="23" r="2.4"/><circle class="art-eye" cx="39" cy="23" r="2.4"/>
+            <path class="art-mouth" d="M24 31h18l-3 6H27z"/>
+          </svg>
+          <span class="game-name">Boss battle</span>
+          <span class="game-desc">Defeat your notes</span>
+        </button>
+      </nav>
+
       <!-- Flashcards -->
-      <div id="view-cards" class="view">
+      <div id="view-cards" class="view screen">
         <div class="card-stage">
           <button id="flashcard" class="flashcard" aria-live="polite">
             <span class="card-inner">
@@ -52,41 +123,46 @@
             </span>
           </button>
         </div>
-        <p class="hint muted">Tap the card or press Space to flip. Arrow keys move between cards.</p>
+        <p class="hint muted small">Tap the card or press Space to flip. Arrow keys move between cards.</p>
         <div class="card-controls">
-          <button id="prev-card" class="btn" type="button">Previous</button>
-          <span id="card-pos" class="mono"></span>
-          <button id="next-card" class="btn" type="button">Next</button>
+          <button id="prev-card" class="btn btn-round" type="button" aria-label="Previous card">‹</button>
+          <span id="card-pos" class="count"></span>
+          <button id="next-card" class="btn btn-round" type="button" aria-label="Next card">›</button>
         </div>
         <div class="card-controls">
-          <button id="learning-btn" class="btn btn-soft" type="button">Still learning</button>
+          <button id="learning-btn" class="btn btn-learning" type="button">Still learning</button>
           <button id="known-btn" class="btn btn-good" type="button">Got it</button>
-          <button id="shuffle-btn" class="btn" type="button">Shuffle</button>
+          <button id="shuffle-btn" class="btn btn-quiet" type="button">Shuffle</button>
         </div>
-        <p class="tally mono"><span id="known-count">0</span> known · <span id="learning-count">0</span> still learning</p>
+        <p class="tally small" id="tally"><span id="known-count">0</span> known, <span id="learning-count">0</span> still learning</p>
       </div>
 
       <!-- Quiz -->
-      <div id="view-quiz" class="view" hidden>
+      <div id="view-quiz" class="view screen" hidden>
         <div id="quiz-body"></div>
       </div>
 
       <!-- Match game -->
-      <div id="view-match" class="view" hidden>
+      <div id="view-match" class="view screen" hidden>
         <div class="match-bar">
-          <span class="mono">Time <strong id="match-time">0.0s</strong></span>
-          <span class="mono">Best <strong id="match-best">—</strong></span>
+          <span class="stat">Time <strong id="match-time">0.0s</strong></span>
+          <span class="stat">Best <strong id="match-best">none yet</strong></span>
           <button id="match-restart" class="btn" type="button">New round</button>
         </div>
-        <p class="hint muted">Match each term with its answer. Wrong picks add 2 seconds.</p>
+        <p class="hint muted small">Match each term with its answer. Wrong picks add 2 seconds.</p>
         <div id="match-grid" class="match-grid"></div>
         <p id="match-done" class="match-done" hidden></p>
+      </div>
+
+      <!-- Boss battle -->
+      <div id="view-boss" class="view screen screen-boss" hidden>
+        <div id="boss-body"></div>
       </div>
     </section>
   </main>
 
-  <footer class="wrap foot muted">
-    Built by me with help from Claude. Study sets are AI-generated, so double-check anything important.
+  <footer class="wrap foot">
+    Built by me with help from Claude. AI-made study sets can contain mistakes, so double-check anything important.
   </footer>
 
   <script src="app.js"></script>

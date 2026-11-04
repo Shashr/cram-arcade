@@ -1,0 +1,8 @@
+# Topics that show up in the Cram Box menu. One per line.
+# Change these to whatever you're studying. Lines starting with # are ignored.
+Cell biology
+Newton's laws of motion
+Chemical bonding
+World War I causes
+Logarithms
+French verbs: passe compose
