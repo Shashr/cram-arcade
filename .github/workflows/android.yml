@@ -53,22 +53,17 @@ jobs:
           sed -i -E "s/versionCode [0-9]+/versionCode ${BUILD_NUMBER}/; s/versionName \"[^\"]*\"/versionName \"1.0.${BUILD_NUMBER}\"/" android/app/build.gradle
           grep -E "versionCode|versionName" android/app/build.gradle
 
-      - name: Build the signed app
+      - name: Build and sign the app
         run: |
-          export PATH="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1):$PATH"
-          npx cap build android \
-            --keystorepath "$PWD/android-signing/sideload.keystore" \
-            --keystorepass android \
-            --keystorealias cramarcade \
-            --keystorealiaspass android \
-            --androidreleasetype APK
-
-      - name: Put it on the website
-        run: |
-          APK=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          test -n "$APK"
+          (cd android && ./gradlew assembleRelease --no-daemon)
+          TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)"
+          UNSIGNED=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          test -n "$UNSIGNED"
+          "$TOOLS/zipalign" -f -p 4 "$UNSIGNED" aligned.apk
           mkdir -p downloads
-          cp "$APK" downloads/cram-arcade.apk
+          "$TOOLS/apksigner" sign --ks android-signing/sideload.keystore --ks-key-alias cramarcade \
+            --ks-pass pass:android --key-pass pass:android --out downloads/cram-arcade.apk aligned.apk
+          "$TOOLS/apksigner" verify --print-certs downloads/cram-arcade.apk
           printf '{"build":%s,"version":"1.0.%s","built":"%s"}\n' "$BUILD_NUMBER" "$BUILD_NUMBER" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > downloads/version.json
           ls -la downloads
 
