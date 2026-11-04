@@ -1,13 +1,15 @@
 // Local development server: run `npm start`, then open http://localhost:3000
-// (On Vercel this file isn't used; Vercel serves the files and runs api/generate.js itself.)
+// (On Vercel this file isn't used; Vercel serves the files and runs the api/ functions itself.)
 import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import handler from "./api/generate.js";
+import generate from "./api/generate.js";
+import crew from "./api/crew.js";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
+const apis = { "/api/generate": generate, "/api/crew": crew };
 
 // Load ANTHROPIC_API_KEY from a local .env file if there is one.
 const envFile = path.join(root, ".env");
@@ -21,15 +23,18 @@ if (existsSync(envFile)) {
 const types = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml" };
 
 const server = http.createServer(async (req, res) => {
-  // Small helpers so api/generate.js works the same way it does on Vercel.
+  // Small helpers so the api/ functions work the same way they do on Vercel.
   res.status = (code) => { res.statusCode = code; return res; };
   res.json = (obj) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(obj)); };
 
-  if (req.url.startsWith("/api/generate")) {
+  const url = new URL(req.url, "http://localhost");
+  const api = apis[url.pathname];
+  if (api) {
     let body = "";
     for await (const chunk of req) body += chunk;
     try { req.body = JSON.parse(body || "{}"); } catch { req.body = {}; }
-    return handler(req, res);
+    req.query = Object.fromEntries(url.searchParams);
+    return api(req, res);
   }
 
   const urlPath = req.url === "/" ? "/index.html" : req.url.split("?")[0];
