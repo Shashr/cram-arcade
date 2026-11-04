@@ -311,6 +311,108 @@ main { display: grid; gap: 28px; padding-block: 24px 40px; }
   .test-count { width: auto; min-height: 0; grid-auto-flow: column; justify-content: start; gap: 8px; align-items: baseline; }
 }
 
+/* Study plan line on test cards */
+.plan-line { margin-top: 6px !important; }
+.link-btn {
+  font: inherit; font-weight: 700; color: var(--text); background: none; border: 0; padding: 0;
+  text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; cursor: pointer;
+}
+
+/* Reminder banner */
+.reminders { display: grid; gap: 10px; }
+.reminders:empty { display: none; }
+.reminder {
+  position: relative;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
+  padding: 12px 48px 12px 16px;
+  color: #1c1240; background: #fff4cf;
+  border: 3px solid #0d0726; border-left: 12px solid var(--yellow); border-radius: var(--r-md);
+  box-shadow: 5px 5px 0 #0d0726;
+  animation: row-in 0.3s ease;
+}
+.reminder-test { background: #ffe0e3; border-left-color: var(--red); }
+.reminder-text { margin: 0; flex: 1 1 260px; }
+.reminder-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.reminder .btn { color: #1c1240; border-color: #1c1240; box-shadow: 3px 3px 0 #1c1240; }
+.reminder .btn-primary { background: var(--yellow); }
+.reminder .btn-good { background: var(--green); }
+.reminder-hide {
+  position: absolute; top: 6px; right: 6px; width: 32px; height: 32px; border-radius: 50%;
+  font: inherit; font-size: 1.2rem; line-height: 1; color: #625a88; background: none; border: 0; cursor: pointer;
+}
+.reminder-hide:hover { background: rgba(28, 18, 64, 0.08); color: #1c1240; }
+
+/* Pop-up when a session starts */
+.reminder-pop {
+  position: fixed; right: 16px; bottom: 16px; z-index: 70;
+  width: min(380px, calc(100vw - 32px));
+  padding: 16px; display: grid; gap: 10px;
+  color: #1c1240; background: var(--yellow);
+  border: 3px solid #0d0726; border-radius: var(--r-md); box-shadow: 6px 6px 0 #0d0726;
+  animation: pop-in 0.45s cubic-bezier(.3, 1.5, .5, 1);
+}
+.reminder-pop p { margin: 0; font-weight: 700; font-size: 1.05rem; }
+.reminder-pop .btn { color: #1c1240; border-color: #1c1240; box-shadow: 3px 3px 0 #1c1240; }
+.reminder-pop .btn-primary { background: #ffffff; }
+.reminder-pop .btn-quiet { background: transparent; box-shadow: none; }
+@keyframes pop-in { from { opacity: 0; transform: translateY(40px) scale(0.9); } }
+
+/* Calendar */
+.sheet-wide { width: min(780px, calc(100% - 32px)); }
+.notify-btn { font-size: 0.85rem; padding: 6px 12px; }
+.cal-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0 10px; }
+.cal-month { margin: 0; font-family: var(--sign); font-weight: 400; font-size: 1.15rem; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.cal-dow { text-align: center; font-size: 0.8rem; font-weight: 700; color: var(--muted); padding-bottom: 2px; }
+.cal-cell {
+  font: inherit; color: var(--text); text-align: left;
+  display: grid; align-content: start; gap: 3px;
+  min-height: 78px; padding: 5px; overflow: hidden;
+  background: var(--panel-2); border: 2.5px solid transparent; border-radius: 10px; cursor: pointer;
+}
+.cal-cell:hover { border-color: var(--muted); }
+.cal-cell.other { opacity: 0.45; }
+.cal-cell.past .cal-num { color: var(--muted); }
+.cal-cell.today .cal-num { background: var(--line); color: #ffffff; }
+.cal-cell.selected { border-color: var(--line); background: var(--panel); box-shadow: 3px 3px 0 var(--line); }
+.cal-num { justify-self: start; min-width: 26px; padding: 1px 6px; border-radius: 999px; font-weight: 700; font-size: 0.85rem; text-align: center; }
+.cal-marks { display: grid; gap: 2px; min-width: 0; }
+.cal-chip {
+  display: block; padding: 1px 6px; border-radius: 5px;
+  font-size: 0.72rem; font-weight: 700; line-height: 1.35; color: #1c1240;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chip-test { background: var(--red); color: #ffffff; }
+.chip-session { background: var(--blue); }
+.chip-session.done { background: var(--green); }
+@media (max-width: 560px) {
+  .cal-cell { min-height: 54px; padding: 4px 3px; }
+  .cal-marks { display: flex; flex-wrap: wrap; gap: 3px; }
+  .cal-chip { width: 9px; height: 9px; padding: 0; border-radius: 50%; font-size: 0; }
+}
+.cal-day { margin-top: 16px; display: grid; gap: 10px; }
+.cal-day-title { margin: 0; font-size: 1.1rem; }
+.cal-items { display: grid; gap: 6px; }
+.cal-items > p { margin: 0; }
+.cal-item {
+  position: relative; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 44px 8px 10px; background: var(--panel-2); border-radius: 10px; border-left: 6px solid var(--blue);
+}
+.cal-item.item-test { border-left-color: var(--red); }
+.cal-item.done { border-left-color: var(--green); }
+.cal-item strong { flex: 1 1 160px; overflow-wrap: anywhere; }
+.cal-item .test-remove { top: 50%; transform: translateY(-50%); }
+.cal-item-kind { font-size: 0.8rem; font-weight: 700; color: var(--muted); min-width: 64px; }
+.done-tag { font-size: 0.8rem; font-weight: 700; color: var(--good); }
+.small-btn { padding: 4px 10px; font-size: 0.85rem; }
+.cal-forms { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 640px) { .cal-forms { grid-template-columns: 1fr; } }
+.cal-form { display: grid; gap: 6px; padding: 12px; background: var(--panel-2); border-radius: 12px; }
+.cal-form .text-input, .cal-form .test-select { background: var(--panel); }
+.cal-form-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.cal-form-row .text-input { flex: 1 1 140px; width: auto; }
+.cal-form-row input[type="time"] { flex: 0 1 130px; }
+
 /* Power-ups in boss battle */
 .powers { display: flex; flex-wrap: wrap; gap: 8px; }
 .power {

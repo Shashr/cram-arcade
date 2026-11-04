@@ -29,6 +29,29 @@
     </div>
   </header>
 
+  <dialog id="calendar" class="sheet sheet-wide" aria-labelledby="calendar-title">
+    <div class="sheet-head">
+      <h2 id="calendar-title">Calendar</h2>
+      <button id="notify-btn" class="btn btn-quiet notify-btn" type="button" hidden>Turn on reminders</button>
+      <button class="sheet-close" type="button" data-close aria-label="Close">×</button>
+    </div>
+    <div class="cal-nav">
+      <button id="cal-prev" class="btn btn-round" type="button" aria-label="Previous month">‹</button>
+      <h3 id="cal-month" class="cal-month" aria-live="polite"></h3>
+      <button id="cal-next" class="btn btn-round" type="button" aria-label="Next month">›</button>
+    </div>
+    <div class="cal-grid" id="cal-grid" role="grid" aria-labelledby="cal-month"></div>
+    <div class="cal-day" id="cal-day"></div>
+  </dialog>
+
+  <div class="reminder-pop" id="reminder-pop" role="alertdialog" aria-labelledby="reminder-pop-text" hidden>
+    <p id="reminder-pop-text"></p>
+    <div class="maker-row">
+      <button id="reminder-snooze" class="btn btn-quiet" type="button">In 10 minutes</button>
+      <button id="reminder-go" class="btn btn-primary" type="button">Study now</button>
+    </div>
+  </div>
+
   <dialog id="account" class="sheet" aria-labelledby="account-title">
     <div class="sheet-head">
       <h2 id="account-title">Your account</h2>
@@ -62,6 +85,8 @@
   </dialog>
 
   <main class="wrap">
+    <div id="reminders" class="reminders" aria-live="polite"></div>
+
     <section class="panel maker-wrap" aria-label="Make a study set">
       <div class="switch mode-switch" role="tablist" aria-label="How to make a set">
         <button role="tab" class="tab" aria-selected="true" data-mode="ai" type="button">Make it with AI</button>
@@ -107,6 +132,7 @@
       <div class="tests-head">
         <h2 class="shelf-title" id="tests-title">Upcoming tests</h2>
         <div class="tests-actions">
+          <button id="open-calendar" class="chip-btn" type="button">Calendar</button>
           <button id="cal-connect" class="chip-btn" type="button" hidden>Find tests in Google Calendar</button>
           <button id="test-add-toggle" class="chip-btn" type="button" aria-expanded="false">Add a test</button>
         </div>

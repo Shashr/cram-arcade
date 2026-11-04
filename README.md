@@ -20,6 +20,10 @@ Paste your class notes or type a topic, and Cram Arcade uses AI (Claude) to turn
 - **Upcoming tests**: connect Google Calendar (read-only) to find tests automatically, or add
   them by hand. Each test gets a countdown, a linked study set, and a downloadable study plan
   (a calendar file with an evening session for each of the days before the test).
+- **Calendar and study sessions**: a month calendar inside the app for tests and study
+  sessions. "Plan study sessions" adds an evening session before each test; a banner and a
+  pop-up remind you when the app is open (plus a browser notification if you allow it), and
+  finishing a session earns tickets. Sessions can also be added to your phone's calendar.
 - **Crew leaderboards**: start a crew, share the 5-letter code, and compete with friends
   for the most tickets this week and all time.
 
