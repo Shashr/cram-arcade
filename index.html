@@ -25,6 +25,7 @@
       </span>
       <button id="open-shop" class="chip-btn" type="button">Prize counter</button>
       <button id="open-crew" class="chip-btn" type="button">Crew leaderboard</button>
+      <button id="open-class" class="chip-btn" type="button">Classroom</button>
       <button id="open-account" class="chip-btn account-chip" type="button">Sign in</button>
     </div>
   </header>
@@ -51,6 +52,14 @@
       <button id="reminder-go" class="btn btn-primary" type="button">Study now</button>
     </div>
   </div>
+
+  <dialog id="classroom" class="sheet sheet-wide" aria-labelledby="class-title">
+    <div class="sheet-head">
+      <h2 id="class-title">Classroom</h2>
+      <button class="sheet-close" type="button" data-close aria-label="Close">×</button>
+    </div>
+    <div id="class-body"></div>
+  </dialog>
 
   <dialog id="account" class="sheet" aria-labelledby="account-title">
     <div class="sheet-head">

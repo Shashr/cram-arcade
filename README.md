@@ -24,6 +24,10 @@ Paste your class notes or type a topic, and Cram Arcade uses AI (Claude) to turn
   sessions. "Plan study sessions" adds an evening session before each test; a banner and a
   pop-up remind you when the app is open (plus a browser notification if you allow it), and
   finishing a session earns tickets. Sessions can also be added to your phone's calendar.
+- **Teacher mode (Classroom)**: a teacher creates a class from their study sets and shares a
+  6-character code. Students join with the code and their first name, and their quiz, boss
+  battle and flashcard results on the assigned sets show up on the teacher's dashboard, along
+  with **trouble spots**: the questions the class misses most. Uses the same database as crews.
 - **Crew leaderboards**: start a crew, share the 5-letter code, and compete with friends
   for the most tickets this week and all time.
 

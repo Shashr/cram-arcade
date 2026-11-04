@@ -170,9 +170,9 @@ const SAVED_KEY = "cram-sets";
 function savedSets() {
   try { return JSON.parse(safeGet(SAVED_KEY) || "[]"); } catch { return []; }
 }
-function saveSet(set, kind) {
+function saveSet(set, kind, extra = {}) {
   const list = savedSets().filter((s) => s.title !== set.title);
-  list.unshift({ title: set.title, cards: set.cards, quiz: set.quiz, kind, savedAt: Date.now() });
+  list.unshift({ title: set.title, cards: set.cards, quiz: set.quiz, kind, ...extra, savedAt: Date.now() });
   safeSet(SAVED_KEY, JSON.stringify(list.slice(0, 30)));
   renderSaved();
   renderTests();
@@ -191,7 +191,7 @@ function renderSaved() {
     open.className = "saved-open";
     open.innerHTML = `<span></span><span class="mono muted"></span>`;
     open.firstChild.textContent = s.title;
-    open.lastChild.textContent = `${s.cards.length} cards, ${s.kind === "own" ? "made by you" : "made with AI"}`;
+    open.lastChild.textContent = `${s.cards.length} cards, ${s.kind === "own" ? "made by you" : s.kind === "class" ? `from ${s.className || "your class"}` : "made with AI"}`;
     open.addEventListener("click", () => {
       loadSet(s, s.kind);
       showView("cards");
@@ -714,6 +714,7 @@ function mergeData(local, cloud) {
   const other = base === cloud.player ? local.player : cloud.player;
   const tests = [...(base.tests || [])];
   for (const t of other.tests || []) if (!tests.some((x) => x.id === t.id)) tests.push(t);
+  const byCode = (a = [], b = []) => [...a, ...b.filter((x) => !a.some((y) => y.code === x.code))];
   const sessions = [...(base.sessions || [])];
   for (const t of other.sessions || []) {
     const mine = sessions.find((x) => x.id === t.id);
@@ -730,6 +731,8 @@ function mergeData(local, cloud) {
       plates: [...new Set([...(base.plates || []), ...(other.plates || [])])],
       tests,
       sessions,
+      classes: byCode(base.classes, other.classes),
+      teaching: byCode(base.teaching, other.teaching),
       name: base.name || other.name,
       pending: local.player.pending, // tickets this device hasn't sent to the crew yet
       pendingWins: local.player.pendingWins,
@@ -963,7 +966,7 @@ function renderTests() {
   for (const test of tests) {
     const days = daysUntil(test.date);
     const card = el("article", `test-card ${days <= 1 ? "urgent" : days <= 3 ? "soon" : ""}`);
-    const count = el("div", "test-count");
+    const count = el("div", days === 0 ? "test-count is-today" : "test-count");
     count.append(
       el("strong", "", days === 0 ? "Today" : days === 1 ? "1" : String(days)),
       el("span", "", days === 0 ? "good luck" : days === 1 ? "day left" : "days left"),
@@ -1518,12 +1521,472 @@ getConfig().then((config) => {
   pullSync().then(() => { renderAccountChip(); });
 });
 
+/* ---------- Classroom: students join a class, teachers track progress ----------
+   A teacher creates a class from their saved sets and shares a 6-character code.
+   Students join with the code and a first name; the assigned sets appear in their
+   saved sets, and quiz, boss and flashcard results on those sets go to the teacher. */
+async function classApi(body) {
+  const res = await fetch("/api/classroom", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Couldn't reach the classroom. Check your connection.");
+  return data;
+}
+async function classInfo(code) {
+  const res = await fetch(`/api/classroom?code=${encodeURIComponent(code)}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Couldn't reach the classroom.");
+  return data;
+}
+
+// Put the class's sets into the student's saved sets, tagged with the class.
+function storeClassSets(info) {
+  for (const set of [...info.sets].reverse()) {
+    saveSet(set, "class", { classCode: info.code, className: info.className });
+  }
+}
+
+/* ----- Sending results to the teacher ----- */
+async function reportToClass(result) {
+  if (!state.classCode) return;
+  player.classQueue ||= [];
+  player.classQueue.push({ ...result, code: state.classCode, setTitle: state.set.title });
+  player.classQueue = player.classQueue.slice(-50);
+  savePlayer();
+  flushClassQueue();
+}
+let classFlushing = false;
+async function flushClassQueue() {
+  if (classFlushing || !player.classQueue?.length) return;
+  classFlushing = true;
+  while (player.classQueue.length) {
+    const item = player.classQueue[0];
+    try {
+      await classApi({ action: "report", playerId: player.id, ...item });
+    } catch (err) {
+      // Wrong class or set removed: drop it. Network trouble: try again later.
+      if (!/connection|reach|database|Slow down/i.test(err.message)) player.classQueue.shift();
+      else break;
+      continue;
+    }
+    player.classQueue.shift();
+  }
+  savePlayer();
+  classFlushing = false;
+}
+let cardsReportTimer = 0;
+function reportCardsSoon() {
+  if (!state.classCode) return;
+  clearTimeout(cardsReportTimer);
+  cardsReportTimer = setTimeout(() => reportToClass({ kind: "cards", known: state.known.size, total: state.order.length }), 4000);
+}
+
+/* ----- The Classroom sheet ----- */
+const classUi = { role: safeGet("cram-class-role") || "student", dashboard: null, setTitle: null, busy: false };
+
+function roleSwitch() {
+  const sw = el("div", "switch");
+  sw.setAttribute("role", "tablist");
+  for (const [id, label] of [["student", "I'm a student"], ["teacher", "I'm a teacher"]]) {
+    const b = el("button", "tab", label);
+    b.type = "button";
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(classUi.role === id));
+    b.addEventListener("click", () => { classUi.role = id; classUi.dashboard = null; safeSet("cram-class-role", id); renderClassroom(); });
+    sw.append(b);
+  }
+  return sw;
+}
+
+function playSet(title, view = "cards") {
+  const set = savedSets().find((s) => s.title === title);
+  if (!set) return;
+  loadSet(set, set.kind);
+  showView(view);
+  $("classroom").close();
+  document.querySelector(".set").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function renderStudent(body) {
+  player.classes ||= [];
+  for (const c of player.classes) {
+    const card = el("div", "class-card");
+    const head = el("div", "class-card-head");
+    const title = el("div");
+    title.append(el("h3", "class-name", c.name), el("p", "muted small", `${c.teacher}'s class, code ${c.code}`));
+    const leave = el("button", "btn btn-quiet small-btn", "Leave class");
+    leave.type = "button";
+    leave.addEventListener("click", () => {
+      player.classes = player.classes.filter((x) => x.code !== c.code);
+      savePlayer();
+      renderClassroom();
+    });
+    head.append(title, leave);
+    card.append(head);
+    const list = el("div", "class-sets");
+    for (const t of c.sets || []) {
+      const row = el("div", "class-set");
+      row.append(el("strong", "", t));
+      const study = el("button", "btn small-btn", "Flashcards");
+      study.type = "button";
+      study.addEventListener("click", () => playSet(t, "cards"));
+      const fight = el("button", "btn btn-primary small-btn", "Boss battle");
+      fight.type = "button";
+      fight.addEventListener("click", () => playSet(t, "boss"));
+      row.append(study, fight);
+      list.append(row);
+    }
+    card.append(list);
+    card.append(el("p", "muted small", "Your quiz, boss battle and flashcard results on these sets are shared with your teacher."));
+    body.append(card);
+  }
+
+  const form = el("form", "class-form");
+  form.innerHTML = `
+    <h3 class="sheet-sub">${player.classes.length ? "Join another class" : "Join your class"}</h3>
+    <p class="muted small">Your teacher gives you a 6-character class code.</p>
+    <div class="cal-form-row">
+      <input class="text-input code-input" id="class-code" maxlength="6" placeholder="Class code" aria-label="Class code" autocomplete="off">
+      <input class="text-input" id="class-me" maxlength="30" placeholder="Your first name" aria-label="Your first name" autocomplete="given-name">
+      <button class="btn btn-primary" type="submit">Join class</button>
+    </div>
+    <p class="status" id="class-status" role="status"></p>`;
+  form.querySelector("#class-me").value = player.name || "";
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const status = form.querySelector("#class-status");
+    status.className = "status";
+    const code = form.querySelector("#class-code").value.trim();
+    const name = form.querySelector("#class-me").value.trim();
+    if (!code || !name) { status.classList.add("error"); status.textContent = "Type the class code and your name."; return; }
+    status.textContent = "Joining…";
+    try {
+      const info = await classApi({ action: "join", code, playerId: player.id, name });
+      player.name ||= name;
+      player.classes = player.classes.filter((x) => x.code !== info.code);
+      player.classes.push({ code: info.code, name: info.className, teacher: info.teacher, sets: info.sets.map((s) => s.title) });
+      storeClassSets(info);
+      savePlayer();
+      fx.play("win");
+      renderClassroom();
+    } catch (err) {
+      status.classList.add("error");
+      status.textContent = err.message;
+      fx.play("bad");
+    }
+  });
+  body.append(form);
+}
+
+// Pick up sets the teacher added since the student joined.
+async function refreshStudentClasses() {
+  for (const c of player.classes || []) {
+    try {
+      const info = await classInfo(c.code);
+      c.name = info.className;
+      c.sets = info.sets.map((s) => s.title);
+      storeClassSets(info);
+    } catch { /* offline or class gone: keep what we have */ }
+  }
+  savePlayer();
+}
+
+function teacherCreateForm() {
+  const sets = savedSets().filter((s) => s.kind !== "class");
+  const form = el("form", "class-form");
+  form.innerHTML = `
+    <h3 class="sheet-sub">Create a class</h3>
+    <div class="class-fields">
+      <label class="label" for="new-class-name">Class name</label>
+      <input class="text-input" id="new-class-name" maxlength="60" placeholder="Bio 11, period 2" autocomplete="off">
+      <label class="label" for="new-class-teacher">Your name, as students know you</label>
+      <input class="text-input" id="new-class-teacher" maxlength="40" placeholder="Ms. Lee" autocomplete="off">
+    </div>
+    <p class="label">Study sets to assign</p>
+    <div class="class-pick"></div>
+    <div class="maker-row"><p class="status" id="new-class-status" role="status"></p><button class="btn btn-primary" type="submit">Create class</button></div>`;
+  const pick = form.querySelector(".class-pick");
+  if (!sets.length) {
+    pick.append(el("p", "muted small", "You don't have any study sets yet. Make one first (with AI, or Type my own), then come back here to assign it."));
+    form.querySelector("button[type=submit]").disabled = true;
+  }
+  sets.forEach((s, i) => {
+    const row = el("label", "cal-row");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.value = String(i);
+    box.checked = i === 0;
+    row.append(box, el("span", "", s.title), el("span", "muted small", `${s.cards.length} cards`));
+    pick.append(row);
+  });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const status = form.querySelector("#new-class-status");
+    status.className = "status";
+    const chosen = [...pick.querySelectorAll("input:checked")].map((b) => sets[Number(b.value)]);
+    status.textContent = "Creating…";
+    try {
+      const info = await classApi({
+        action: "create",
+        className: form.querySelector("#new-class-name").value,
+        teacherName: form.querySelector("#new-class-teacher").value,
+        sets: chosen.map(({ title, cards, quiz: q }) => ({ title, cards, quiz: q })),
+      });
+      player.teaching ||= [];
+      player.teaching.push({ code: info.code, key: info.teacherKey, name: info.className });
+      savePlayer();
+      fx.play("win");
+      confetti(60);
+      openDashboard(info.code);
+    } catch (err) {
+      status.classList.add("error");
+      status.textContent = err.message;
+      fx.play("bad");
+    }
+  });
+  return form;
+}
+
+function renderTeacher(body) {
+  player.teaching ||= [];
+  if (player.teaching.length) {
+    const list = el("div", "class-list");
+    list.append(el("h3", "sheet-sub", "Your classes"));
+    for (const c of player.teaching) {
+      const row = el("button", "class-open");
+      row.type = "button";
+      row.append(el("strong", "", c.name), el("span", "class-code-tag", c.code));
+      row.addEventListener("click", () => openDashboard(c.code));
+      list.append(row);
+    }
+    body.append(list);
+  } else {
+    body.append(el("p", "", "Create a class, assign study sets, and share the code with your students. You'll see each student's quiz scores, boss battles and flashcard progress, plus the questions your class misses most."));
+  }
+  body.append(teacherCreateForm());
+}
+
+async function openDashboard(code) {
+  const mine = (player.teaching || []).find((c) => c.code === code);
+  if (!mine) return;
+  classUi.role = "teacher";
+  const body = $("class-body");
+  body.innerHTML = '<p class="muted">Loading your class…</p>';
+  try {
+    classUi.dashboard = await classApi({ action: "dashboard", code, teacherKey: mine.key });
+    mine.name = classUi.dashboard.className;
+    if (!classUi.dashboard.sets.some((s) => s.title === classUi.setTitle)) classUi.setTitle = classUi.dashboard.sets[0]?.title;
+  } catch (err) {
+    body.innerHTML = "";
+    body.append(el("p", "status error", err.message));
+    const back = el("button", "btn", "Back");
+    back.type = "button";
+    back.addEventListener("click", () => { classUi.dashboard = null; renderClassroom(); });
+    const forget = el("button", "btn btn-quiet", "Remove this class from my list");
+    forget.type = "button";
+    forget.addEventListener("click", () => { player.teaching = player.teaching.filter((c) => c.code !== code); savePlayer(); classUi.dashboard = null; renderClassroom(); });
+    body.append(el("div", "maker-row"));
+    body.lastChild.append(back, forget);
+    return;
+  }
+  renderDashboard();
+}
+
+function ago(ms) {
+  if (!ms) return "Not yet";
+  const mins = Math.round((Date.now() - ms) / 60000);
+  if (mins < 2) return "Just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "Yesterday" : `${days} days ago`;
+}
+
+function renderDashboard() {
+  const d = classUi.dashboard;
+  const mine = player.teaching.find((c) => c.code === d.code);
+  const body = $("class-body");
+  body.innerHTML = "";
+
+  const top = el("div", "dash-head");
+  const back = el("button", "btn btn-quiet small-btn", "‹ All classes");
+  back.type = "button";
+  back.addEventListener("click", () => { classUi.dashboard = null; renderClassroom(); });
+  const refresh = el("button", "btn small-btn", "Refresh");
+  refresh.type = "button";
+  refresh.addEventListener("click", () => openDashboard(d.code));
+  top.append(back, refresh);
+  body.append(top);
+
+  const hero = el("div", "dash-hero");
+  const names = el("div");
+  names.append(el("h3", "class-name", d.className), el("p", "muted small", `${d.teacher}'s class`));
+  const codeBox = el("div", "dash-code");
+  codeBox.append(el("span", "small", "Class code"), el("strong", "", d.code));
+  const copy = el("button", "btn small-btn", "Copy code");
+  copy.type = "button";
+  copy.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(d.code); copy.textContent = "Copied"; } catch { copy.textContent = d.code; }
+    setTimeout(() => { copy.textContent = "Copy code"; }, 1500);
+  });
+  codeBox.append(copy);
+  hero.append(names, codeBox);
+  body.append(hero);
+  body.append(el("p", "muted small", "Students open Classroom, choose \"I'm a student\", and type this code."));
+
+  if (d.sets.length > 1) {
+    const pickRow = el("div", "dash-set-pick");
+    const label = el("label", "label", "Showing results for");
+    label.htmlFor = "dash-set";
+    const pick = document.createElement("select");
+    pick.id = "dash-set";
+    pick.className = "test-select";
+    for (const s of d.sets) pick.append(new Option(s.title, s.title, false, s.title === classUi.setTitle));
+    pick.addEventListener("change", () => { classUi.setTitle = pick.value; renderDashboard(); });
+    pickRow.append(label, pick);
+    body.append(pickRow);
+  }
+  const setTitle = classUi.setTitle;
+  const rows = d.students.map((s) => ({ ...s, p: s.progress[setTitle] || null }));
+
+  // Summary numbers
+  const played = rows.filter((r) => r.p);
+  const quizScores = played.map((r) => r.p.quizBest).filter((v) => v != null);
+  const stats = el("div", "stats dash-stats");
+  [
+    [String(d.students.length), "Students joined"],
+    [String(played.length), `Played ${d.sets.length > 1 ? "this set" : "so far"}`],
+    [quizScores.length ? `${Math.round(quizScores.reduce((a, b) => a + b, 0) / quizScores.length)}%` : "–", "Average best quiz"],
+    [String(played.filter((r) => r.p.bossWins > 0).length), "Beat the boss"],
+  ].forEach(([v, l]) => { const b = el("div"); b.append(el("strong", "", v), el("span", "", l)); stats.append(b); });
+  body.append(stats);
+
+  // Students table
+  body.append(el("h3", "sheet-sub", "Students"));
+  if (!rows.length) {
+    body.append(el("p", "muted", "No students yet. Share the class code to get started."));
+  } else {
+    const wrap = el("div", "table-wrap");
+    const table = el("table", "dash-table");
+    table.innerHTML = "<thead><tr><th>Name</th><th>Best quiz</th><th>Boss battle</th><th>Flashcards</th><th>Last active</th><th><span class=\"sr-only\">Remove</span></th></tr></thead>";
+    const tbody = el("tbody");
+    rows.sort((a, b) => (b.p?.last || 0) - (a.p?.last || 0) || a.name.localeCompare(b.name));
+    for (const r of rows) {
+      const tr = el("tr");
+      const p = r.p;
+      const quizCell = p?.quizBest != null ? `${p.quizBest}%` : "–";
+      const bossCell = !p?.bossFights ? "–"
+        : p.bossWins ? `Won${p.bossWins > 1 ? ` ×${p.bossWins}` : ""}, best ${Math.round(p.bestBossTime)}s`
+        : `${p.bossFights} ${p.bossFights === 1 ? "try" : "tries"}, ${p.bestAccuracy}% right`;
+      const cardsCell = p?.cardsTotal ? `${p.cardsKnown} / ${p.cardsTotal}` : "–";
+      for (const [text, cls] of [[r.name, "name"], [quizCell, p?.quizBest >= 80 ? "good" : p?.quizBest != null && p.quizBest < 50 ? "low" : ""], [bossCell, p?.bossWins ? "good" : ""], [cardsCell, ""], [ago(p?.last), "muted"]]) {
+        tr.append(el("td", cls, text));
+      }
+      const td = el("td");
+      const del = el("button", "test-remove", "×");
+      del.type = "button";
+      del.setAttribute("aria-label", `Remove ${r.name} from the class`);
+      del.addEventListener("click", async () => {
+        try { await classApi({ action: "removeStudent", code: d.code, teacherKey: mine.key, playerId: r.id }); } catch { /* ignore */ }
+        openDashboard(d.code);
+      });
+      td.append(del);
+      tr.append(td);
+      tbody.append(tr);
+    }
+    table.append(tbody);
+    wrap.append(table);
+    body.append(wrap);
+  }
+
+  // Trouble spots
+  body.append(el("h3", "sheet-sub", "Trouble spots"));
+  body.append(el("p", "muted small", "The questions your class gets wrong most often, across the quiz and boss battle."));
+  const trouble = d.trouble.filter((t) => t.set === setTitle).slice(0, 8);
+  if (!trouble.length) body.append(el("p", "muted", "Nothing yet. These show up once students start playing."));
+  else {
+    const max = trouble[0].count;
+    const list = el("ol", "trouble");
+    for (const t of trouble) {
+      const li = el("li");
+      const bar = el("span", "trouble-bar");
+      bar.style.width = `${Math.max(8, (t.count / max) * 100)}%`;
+      li.append(el("span", "trouble-q", t.prompt), el("span", "trouble-n", `missed ${t.count}×`), bar);
+      list.append(li);
+    }
+    body.append(list);
+  }
+
+  // Assigned sets
+  body.append(el("h3", "sheet-sub", "Assigned sets"));
+  const setsBox = el("div", "class-sets");
+  for (const s of d.sets) {
+    const row = el("div", "class-set");
+    row.append(el("strong", "", s.title), el("span", "muted small", `${s.cards.length} cards`));
+    if (d.sets.length > 1) {
+      const rm = el("button", "btn btn-quiet small-btn", "Unassign");
+      rm.type = "button";
+      rm.addEventListener("click", async () => {
+        try { await classApi({ action: "removeSet", code: d.code, teacherKey: mine.key, setTitle: s.title }); } catch { /* ignore */ }
+        openDashboard(d.code);
+      });
+      row.append(rm);
+    }
+    setsBox.append(row);
+  }
+  body.append(setsBox);
+  const extra = savedSets().filter((s) => s.kind !== "class" && !d.sets.some((x) => x.title === s.title));
+  if (extra.length) {
+    const addRow = el("div", "cal-form-row");
+    const pick = document.createElement("select");
+    pick.className = "test-select";
+    pick.setAttribute("aria-label", "Study set to assign");
+    for (const s of extra) pick.append(new Option(s.title, s.title));
+    const add = el("button", "btn small-btn", "Assign this set");
+    add.type = "button";
+    add.addEventListener("click", async () => {
+      const set = extra.find((s) => s.title === pick.value);
+      try {
+        await classApi({ action: "addSet", code: d.code, teacherKey: mine.key, set: { title: set.title, cards: set.cards, quiz: set.quiz } });
+        classUi.setTitle = set.title;
+        fx.play("good");
+      } catch (err) { alertLine(body, err.message); return; }
+      openDashboard(d.code);
+    });
+    addRow.append(pick, add);
+    body.append(addRow);
+  }
+
+  if (d.database === "test") {
+    body.append(el("p", "muted small test-note", "Test mode: this class only lives on this computer until the server restarts. Connect the database when the site is online so students can join from their own devices."));
+  }
+}
+function alertLine(body, text) {
+  body.append(el("p", "status error", text));
+}
+
+async function renderClassroom() {
+  const body = $("class-body");
+  if (classUi.dashboard) { renderDashboard(); return; }
+  body.innerHTML = "";
+  body.append(roleSwitch());
+  if (classUi.role === "teacher") renderTeacher(body);
+  else await renderStudent(body);
+}
+
+$("open-class").addEventListener("click", async () => {
+  openSheet("classroom");
+  if ((player.classes || []).length) { await refreshStudentClasses(); if (!classUi.dashboard) renderClassroom(); }
+});
+flushClassQueue();
+
 function openSheet(id) {
   const sheet = $(id);
   if (id === "shop") renderShop();
   if (id === "crew") renderCrew(true);
   if (id === "account") renderAccount();
   if (id === "calendar") renderCalendar();
+  if (id === "classroom") renderClassroom();
   if (sheet.showModal) sheet.showModal(); else sheet.setAttribute("open", "");
   fx.play("click");
 }
@@ -1545,8 +2008,9 @@ function loadSet(set, kind) {
   state.known.clear();
   state.learning.clear();
   state.deckAwarded = false;
+  state.classCode = set.classCode || null; // results from class sets go to the teacher
   $("set-title").textContent = set.title;
-  $("set-kind").textContent = KIND_LABELS[kind] || "Study set";
+  $("set-kind").textContent = kind === "class" ? `From ${set.className || "your class"}` : KIND_LABELS[kind] || "Study set";
   renderCard();
   startQuiz();
   newMatchRound();
@@ -1590,6 +2054,7 @@ function markCard(known) {
   fx.play(known ? "good" : "click");
   replay($(known ? "known-btn" : "learning-btn"), "pulse", 400);
   replay($("tally"), "bump", 300);
+  reportCardsSoon();
   if (known && state.known.size === state.order.length && !state.deckAwarded) {
     state.deckAwarded = true;
     confetti();
@@ -1618,7 +2083,7 @@ document.addEventListener("keydown", (e) => {
 
 /* ---------- Quiz ---------- */
 const quiz = { i: 0, score: 0 };
-function startQuiz() { quiz.i = 0; quiz.score = 0; renderQuestion(); }
+function startQuiz() { quiz.i = 0; quiz.score = 0; quiz.missed = []; renderQuestion(); }
 
 function renderQuestion() {
   const body = $("quiz-body");
@@ -1664,6 +2129,7 @@ function answer(choice, card) {
   });
   const right = choice === q.answer;
   if (right) quiz.score++;
+  else quiz.missed.push(q.question);
   fx.play(right ? "good" : "bad");
   if (!right) replay(card, "shake", 400);
   const fb = card.querySelector(".feedback");
@@ -1692,6 +2158,7 @@ function renderQuizResult() {
   if (pct === 100) { confetti(); fx.play("win"); }
   else fx.play(pct >= 70 ? "pair" : "lose");
   award(quiz.score * 5 + (pct === 100 ? 20 : 0), pct === 100 ? "for a perfect quiz" : "for your quiz answers", "quiz");
+  reportToClass({ kind: "quiz", score: quiz.score, total, missed: quiz.missed });
   const again = document.createElement("button");
   again.type = "button";
   again.className = "btn btn-primary";
@@ -2092,6 +2559,7 @@ function endBoss(won) {
     ? 50 + { S: 60, A: 30, B: 10 }[rank] + Math.min(boss.maxCombo * 5, 40) + (boss.missed.size === 0 ? 25 : 0)
     : Math.min(boss.right * 2, 20);
   const got = award(base, won ? "for beating the boss" : "for the hits you landed", "boss", { win: won });
+  reportToClass({ kind: "boss", won, accuracy, secs, missed: [...boss.missed.keys()] });
 
   if (won) { confetti(120); fx.play("win"); } else fx.play("lose");
   const card = el("div", "quiz-card boss-end");
