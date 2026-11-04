@@ -9,9 +9,10 @@ import generate from "./api/generate.js";
 import crew from "./api/crew.js";
 import account from "./api/account.js";
 import config from "./api/config.js";
+import classroom from "./api/classroom.js";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const apis = { "/api/generate": generate, "/api/crew": crew, "/api/account": account, "/api/config": config };
+const apis = { "/api/generate": generate, "/api/crew": crew, "/api/account": account, "/api/config": config, "/api/classroom": classroom };
 
 const types = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml" };
 

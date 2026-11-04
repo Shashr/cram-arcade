@@ -37,6 +37,7 @@ export const db = REDIS_URL && REDIS_TOKEN ? {
   },
   hset: (key, field, value) => redis(["HSET", key, field, value]),
   hincrby: (key, field, n) => redis(["HINCRBY", key, field, n]),
+  hdel: (key, field) => redis(["HDEL", key, field]),
   exists: async (key) => (await redis(["EXISTS", key])) === 1,
   expire: (key, seconds) => redis(["EXPIRE", key, seconds]),
 } : {
@@ -51,6 +52,7 @@ export const db = REDIS_URL && REDIS_TOKEN ? {
     h.set(field, String(next));
     return next;
   },
+  async hdel(key, field) { if (memory.get(key) instanceof Map) memory.get(key).delete(field); },
   async exists(key) { return memory.has(key); },
   async expire() {},
 };
