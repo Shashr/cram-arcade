@@ -16,6 +16,10 @@ Paste your class notes or type a topic, and Cram Arcade uses AI (Claude) to turn
 - **Tickets and the prize counter**: win arcade tickets in every game (most from boss
   battles) and spend them on power-ups (extra heart, time freeze, 50/50) and nameplates.
   Replaying the same set on the same day earns fewer tickets.
+- **Sign in with Google** to keep tickets, sets, tests and records on every device.
+- **Upcoming tests**: connect Google Calendar (read-only) to find tests automatically, or add
+  them by hand. Each test gets a countdown, a linked study set, and a downloadable study plan
+  (a calendar file with an evening session for each of the days before the test).
 - **Crew leaderboards**: start a crew, share the 5-letter code, and compete with friends
   for the most tickets this week and all time.
 
@@ -63,6 +67,32 @@ runs in **test mode** (only on one computer, wiped when the server restarts).
 `api/crew.js` also accepts `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` if you
 create the database on upstash.com directly. Scores come from players' browsers, so a
 determined friend could fake theirs; the server caps how many tickets one report can add.
+
+### Google sign-in and calendar
+
+Optional. Without it, everything still works on one device, and tests can be added by hand.
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a project
+   called "Cram Arcade".
+2. **APIs & Services → Library**: search for **Google Calendar API** and click **Enable**.
+3. **Google Auth Platform → Branding** (called "OAuth consent screen" in some versions): app
+   name "Cram Arcade" and your email. **Audience**: External. While the app is in
+   **Testing**, add each person who will sign in (you and your friends, up to 100) under
+   **Test users**.
+4. **Data Access**: add the scope `.../auth/calendar.readonly`.
+5. **Clients → Create client → Web application**. Under **Authorized JavaScript origins**
+   add `http://localhost:3000`, `http://localhost`, and your Vercel link
+   (like `https://cram-arcade.vercel.app`). Copy the **Client ID**.
+6. In `.env` (and in Vercel's Environment Variables):
+   - `GOOGLE_CLIENT_ID` = the Client ID
+   - `SESSION_SECRET` = any long random text (keep it the same once set)
+7. Sign-in sync needs the database from the section above when the site is online.
+
+To open the app to everyone (not just test users), Google has to review it because of the
+calendar permission. Sign-in by itself (name, email, picture) doesn't need a review.
+
+The calendar is only read in the browser: event names and dates of tests you choose to
+track are saved, nothing else.
 
 ## What I learned / what's next
 

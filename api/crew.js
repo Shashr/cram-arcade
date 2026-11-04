@@ -1,9 +1,6 @@
 // Crew leaderboards: friends join the same 5-letter crew code and compete for tickets.
 //
-// Storage: a Redis database (free on Upstash, one click from Vercel's Storage tab).
-// Vercel adds KV_REST_API_URL and KV_REST_API_TOKEN automatically when you connect it.
-// Without those, it falls back to memory so you can test on your own computer
-// (memory is wiped when the server restarts, and doesn't work across Vercel instances).
+// Storage: see _db.js (a Redis database online, or memory in test mode).
 //
 // Requests (all JSON):
 //   GET  /api/crew?code=ABCDE                                  -> the leaderboard
@@ -16,60 +13,14 @@
 // The server caps each report and how often a player can report, which is fine
 // for friends; a public game would need the server to run the games itself.
 
-const REDIS_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+import { db } from "./_db.js";
+
 const KEEP_SECONDS = 60 * 60 * 24 * 180; // crews disappear after 180 days without activity
 const MAX_TICKETS_PER_REPORT = 400;
 const MAX_REPORTS_PER_HOUR = 60;
 const MAX_MEMBERS = 50;
 const PLATES = new Set(["classic", "gold", "neon", "flame", "galaxy"]);
 const CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O or 1/I, so codes are easy to read out
-
-/* ---------- storage ---------- */
-const memory = new Map(); // key -> Map(field -> value)
-
-async function redis(command) {
-  const res = await fetch(REDIS_URL, {
-    method: "POST",
-    headers: { authorization: `Bearer ${REDIS_TOKEN}`, "content-type": "application/json" },
-    body: JSON.stringify(command),
-  });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error);
-  return data.result;
-}
-
-const db = REDIS_URL && REDIS_TOKEN ? {
-  mode: "online",
-  async hgetall(key) {
-    const flat = (await redis(["HGETALL", key])) || [];
-    const out = {};
-    for (let i = 0; i < flat.length; i += 2) out[flat[i]] = flat[i + 1];
-    return out;
-  },
-  hset: (key, field, value) => redis(["HSET", key, field, value]),
-  hincrby: (key, field, n) => redis(["HINCRBY", key, field, n]),
-  hlen: (key) => redis(["HLEN", key]),
-  exists: async (key) => (await redis(["EXISTS", key])) === 1,
-  expire: (key, seconds) => redis(["EXPIRE", key, seconds]),
-} : {
-  mode: "test",
-  async hgetall(key) { return Object.fromEntries(memory.get(key) || []); },
-  async hset(key, field, value) {
-    if (!memory.has(key)) memory.set(key, new Map());
-    memory.get(key).set(field, String(value));
-  },
-  async hincrby(key, field, n) {
-    if (!memory.has(key)) memory.set(key, new Map());
-    const h = memory.get(key);
-    const next = Number(h.get(field) || 0) + n;
-    h.set(field, String(next));
-    return next;
-  },
-  async hlen(key) { return memory.get(key)?.size || 0; },
-  async exists(key) { return memory.has(key); },
-  async expire() {},
-};
 
 /* ---------- helpers ---------- */
 // Week number that starts on Monday (UTC), so "this week" resets for everyone at once.

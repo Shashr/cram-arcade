@@ -175,6 +175,8 @@ function saveSet(set, kind) {
   list.unshift({ title: set.title, cards: set.cards, quiz: set.quiz, kind, savedAt: Date.now() });
   safeSet(SAVED_KEY, JSON.stringify(list.slice(0, 30)));
   renderSaved();
+  renderTests();
+  scheduleSync();
 }
 function renderSaved() {
   const list = savedSets();
@@ -206,6 +208,8 @@ function renderSaved() {
       next.splice(i, 1);
       safeSet(SAVED_KEY, JSON.stringify(next));
       renderSaved();
+      renderTests();
+      scheduleSync();
     });
     chip.append(open, del);
     box.append(chip);
@@ -316,6 +320,7 @@ $("own-form").addEventListener("submit", (e) => {
   const title = $("own-title").value.trim() || "My study set";
   const set = { title, cards, quiz: shuffle(cardQuestions(cards)).slice(0, 8) };
   saveSet(set, "own");
+  linkNewSet(set.title);
   loadSet(set, "own");
   showView("cards");
   status.textContent = `Ready: ${cards.length} flashcards, saved on this device.`;
@@ -356,8 +361,11 @@ function loadPlayer() {
   };
 }
 const player = loadPlayer();
-function savePlayer() { safeSet(PLAYER_KEY, JSON.stringify(player)); }
-savePlayer();
+function savePlayer() {
+  safeSet(PLAYER_KEY, JSON.stringify(player));
+  scheduleSync(); // also save to the player's account if they're signed in
+}
+safeSet(PLAYER_KEY, JSON.stringify(player));
 
 function renderTickets() {
   $("ticket-num").textContent = player.tickets;
@@ -652,10 +660,504 @@ async function renderCrew(reload = false) {
   renderCrewBoard(body);
 }
 
+/* ---------- Google sign-in and cloud sync ----------
+   Signing in keeps tickets, saved sets, tests and best times in the player's account,
+   so they follow you between your phone and laptop. Only name, email and picture are
+   requested for sign-in; the calendar is a separate, optional, read-only permission. */
+const SESSION_KEY = "cram-session";
+const account = { config: null, profile: null, syncedAt: 0, syncing: false, error: "" };
+try { account.profile = JSON.parse(safeGet("cram-profile") || "null"); } catch { /* ignore */ }
+
+async function getConfig() {
+  if (account.config) return account.config;
+  try {
+    const res = await fetch("/api/config");
+    account.config = res.ok ? await res.json() : {};
+  } catch {
+    account.config = {};
+  }
+  return account.config;
+}
+
+let googleScript = null;
+function loadGoogle() {
+  googleScript ||= new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.onload = () => resolve(window.google);
+    s.onerror = () => { googleScript = null; reject(new Error("Couldn't load Google sign-in. Check your connection.")); };
+    document.head.append(s);
+  });
+  return googleScript;
+}
+
+function bestTimes() {
+  const out = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k.startsWith("cram-best:") || k.startsWith("cram-boss:")) out[k] = Number(localStorage.getItem(k));
+    }
+  } catch { /* storage blocked */ }
+  return out;
+}
+function localData() {
+  return { player: { ...player }, sets: savedSets(), bests: bestTimes() };
+}
+
+// Combine this device's progress with the account's. The side that has earned more
+// tickets wins for tickets and power-ups; sets, tests, nameplates and records are merged.
+function mergeData(local, cloud) {
+  if (!cloud || !cloud.player) return local;
+  const base = (cloud.player.earned || 0) >= (local.player.earned || 0) ? cloud.player : local.player;
+  const other = base === cloud.player ? local.player : cloud.player;
+  const tests = [...(base.tests || [])];
+  for (const t of other.tests || []) if (!tests.some((x) => x.id === t.id)) tests.push(t);
+  const sets = [...(cloud.sets || [])];
+  for (const s of local.sets || []) if (!sets.some((x) => x.title === s.title)) sets.push(s);
+  const bests = { ...(cloud.bests || {}) };
+  for (const [k, v] of Object.entries(local.bests || {})) if (!bests[k] || (v && v < bests[k])) bests[k] = v;
+  return {
+    player: {
+      ...base,
+      plates: [...new Set([...(base.plates || []), ...(other.plates || [])])],
+      tests,
+      name: base.name || other.name,
+      pending: local.player.pending, // tickets this device hasn't sent to the crew yet
+      pendingWins: local.player.pendingWins,
+    },
+    sets: sets.slice(0, 30),
+    bests,
+  };
+}
+function applyData(data) {
+  Object.assign(player, data.player);
+  safeSet(PLAYER_KEY, JSON.stringify(player));
+  safeSet(SAVED_KEY, JSON.stringify(data.sets || []));
+  for (const [k, v] of Object.entries(data.bests || {})) if (v) safeSet(k, String(v));
+  renderTickets();
+  renderSaved();
+  renderTests();
+  showBest();
+}
+
+async function accountApi(body) {
+  const session = safeGet(SESSION_KEY);
+  const headers = { "content-type": "application/json" };
+  if (session) headers.authorization = `Bearer ${session}`;
+  const res = body
+    ? await fetch("/api/account", { method: "POST", headers, body: JSON.stringify(body) })
+    : await fetch("/api/account", { headers });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && !body?.credential) signOut(true);
+  if (!res.ok) throw new Error(data.error || "Couldn't reach your account.");
+  return data;
+}
+
+let syncTimer = 0;
+function scheduleSync() {
+  if (!safeGet(SESSION_KEY)) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(pushSync, 1500);
+}
+async function pushSync() {
+  if (!safeGet(SESSION_KEY) || account.syncing) return;
+  account.syncing = true;
+  try {
+    await accountApi({ action: "save", data: localData() });
+    account.syncedAt = Date.now();
+    account.error = "";
+  } catch (err) {
+    account.error = err.message;
+  }
+  account.syncing = false;
+  if ($("account").open) renderAccount();
+}
+async function pullSync() {
+  if (!safeGet(SESSION_KEY)) return;
+  try {
+    const { data } = await accountApi();
+    applyData(mergeData(localData(), data));
+    await pushSync();
+  } catch (err) {
+    account.error = err.message;
+  }
+}
+
+async function signIn(credential) {
+  const status = $("account-status");
+  if (status) { status.className = "status"; status.textContent = "Signing in…"; }
+  try {
+    const { session, profile, data } = await accountApi({ action: "signin", credential });
+    safeSet(SESSION_KEY, session);
+    safeSet("cram-profile", JSON.stringify(profile));
+    account.profile = profile;
+    if (!player.name && profile.name) player.name = profile.name;
+    applyData(mergeData(localData(), data));
+    await pushSync();
+    fx.play("win");
+    renderAccountChip();
+    renderAccount();
+  } catch (err) {
+    if (status) { status.classList.add("error"); status.textContent = err.message; }
+    fx.play("bad");
+  }
+}
+function signOut(expired = false) {
+  safeSet(SESSION_KEY, "");
+  safeSet("cram-profile", "null");
+  account.profile = null;
+  account.error = expired ? "Your sign-in expired. Sign in again to keep syncing." : "";
+  try { window.google?.accounts.id.disableAutoSelect(); } catch { /* ignore */ }
+  renderAccountChip();
+  if ($("account").open) renderAccount();
+}
+
+function renderAccountChip() {
+  const chip = $("open-account");
+  chip.textContent = account.profile ? (account.profile.name || "Account") : "Sign in";
+  chip.classList.toggle("signed-in", !!account.profile);
+}
+
+async function renderAccount() {
+  const body = $("account-body");
+  const config = await getConfig();
+  body.innerHTML = "";
+  if (!config.googleClientId) {
+    body.append(el("p", "", "Google sign-in isn't set up on this site yet."));
+    body.append(el("p", "muted small", "If this is your site: add GOOGLE_CLIENT_ID and SESSION_SECRET (see the README, \"Google sign-in and calendar\")."));
+    return;
+  }
+  if (account.profile && safeGet(SESSION_KEY)) {
+    const who = el("div", "who");
+    const avatar = el("span", "avatar", (account.profile.name || "?").slice(0, 1).toUpperCase());
+    if (account.profile.picture) {
+      const img = document.createElement("img");
+      img.src = account.profile.picture;
+      img.alt = "";
+      img.referrerPolicy = "no-referrer";
+      img.onerror = () => img.remove();
+      avatar.append(img);
+    }
+    const names = el("div");
+    names.append(el("strong", "", account.profile.name || "Signed in"), el("span", "muted small", account.profile.email || ""));
+    who.append(avatar, names);
+    body.append(who);
+    body.append(el("p", "", "Your tickets, saved sets, tests and records sync to your account, so they're the same on every device."));
+    const note = account.error ? el("p", "status error", account.error)
+      : el("p", "muted small", account.syncing ? "Syncing…" : account.syncedAt ? `Synced at ${new Date(account.syncedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.` : "");
+    body.append(note);
+    const row = el("div", "maker-row");
+    const sync = el("button", "btn", "Sync now");
+    sync.type = "button";
+    sync.addEventListener("click", async () => { await pullSync(); renderAccount(); });
+    const out = el("button", "btn btn-quiet", "Sign out");
+    out.type = "button";
+    out.addEventListener("click", () => signOut());
+    row.append(sync, out);
+    body.append(row);
+    return;
+  }
+  body.append(el("p", "", "Sign in to keep your tickets, study sets and crew on every device. Everything you've done on this device comes with you."));
+  if (account.error) body.append(el("p", "status error", account.error));
+  const holder = el("div", "gsi-holder");
+  holder.id = "gsi-button";
+  body.append(holder);
+  const status = el("p", "status", "");
+  status.id = "account-status";
+  status.setAttribute("role", "status");
+  body.append(status);
+  try {
+    const google = await loadGoogle();
+    google.accounts.id.initialize({ client_id: config.googleClientId, callback: (r) => signIn(r.credential) });
+    google.accounts.id.renderButton(holder, { theme: "filled_black", size: "large", shape: "pill", text: "signin_with" });
+  } catch (err) {
+    status.classList.add("error");
+    status.textContent = err.message;
+  }
+}
+
+/* ---------- Upcoming tests (Google Calendar or added by hand) ---------- */
+const TEST_WORDS = /\b(tests?|exams?|quiz(zes)?|midterms?|finals?|assessments?|evaluations?|summatives?|culminating|isu)\b/i;
+
+function todayISO() {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+function daysUntil(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const target = new Date(y, m - 1, d);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((target - today) / 86_400_000);
+}
+function prettyDate(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+}
+function upcomingTests() {
+  player.tests ||= [];
+  return player.tests.filter((t) => daysUntil(t.date) >= 0).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+let linkingTestId = null; // the test waiting for its new study set
+function linkNewSet(title) {
+  if (!linkingTestId) return;
+  const test = (player.tests || []).find((t) => t.id === linkingTestId);
+  if (test) { test.setTitle = title; savePlayer(); renderTests(); }
+  linkingTestId = null;
+}
+
+// A calendar file with a 30-minute study session each evening before the test.
+function studyPlanFile(test) {
+  const days = Math.min(5, Math.max(1, daysUntil(test.date)));
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
+  const [y, m, d] = test.date.split("-").map(Number);
+  const escape = (s) => String(s).replace(/[\\;,]/g, (c) => "\\" + c).replace(/\n/g, "\\n");
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Cram Arcade//Study plan//EN", "CALSCALE:GREGORIAN"];
+  for (let i = days; i >= 1; i--) {
+    const day = new Date(y, m - 1, d - i);
+    const date = `${day.getFullYear()}${pad(day.getMonth() + 1)}${pad(day.getDate())}`;
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:cram-${test.id}-${date}@cramarcade`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART:${date}T190000`,
+      `DTEND:${date}T193000`,
+      `SUMMARY:${escape(`Study for ${test.name}`)}`,
+      `DESCRIPTION:${escape(`${i === 1 ? "Last session: beat the boss!" : `${i} days to go.`} ${location.origin}`)}`,
+      "END:VEVENT",
+    );
+  }
+  lines.push("END:VCALENDAR");
+  const blob = new Blob([lines.join("\r\n")], { type: "text/calendar" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `study-plan-${test.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.ics`;
+  document.body.append(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+function renderTests() {
+  const list = $("test-list");
+  list.innerHTML = "";
+  const tests = upcomingTests();
+  if (!tests.length) {
+    list.append(el("p", "tests-empty", "Add your next test and Cram Arcade counts down the days and plans your studying."));
+    return;
+  }
+  const sets = savedSets();
+  for (const test of tests) {
+    const days = daysUntil(test.date);
+    const card = el("article", `test-card ${days <= 1 ? "urgent" : days <= 3 ? "soon" : ""}`);
+    const count = el("div", "test-count");
+    count.append(
+      el("strong", "", days === 0 ? "Today" : days === 1 ? "1" : String(days)),
+      el("span", "", days === 0 ? "good luck" : days === 1 ? "day left" : "days left"),
+    );
+    const info = el("div", "test-info");
+    info.append(el("h3", "test-name", test.name));
+    info.append(el("p", "muted small", `${prettyDate(test.date)}${test.source === "calendar" ? ", from your calendar" : ""}`));
+    const linked = sets.find((s) => s.title === test.setTitle);
+    const actions = el("div", "test-actions");
+    if (linked) {
+      const study = el("button", "btn btn-primary", "Study now");
+      study.type = "button";
+      study.addEventListener("click", () => {
+        loadSet(linked, linked.kind);
+        showView(days <= 1 ? "boss" : "cards");
+        fx.play("click");
+        document.querySelector(".set").scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      actions.append(study);
+      info.append(el("p", "small", `Study set: ${linked.title}`));
+    } else {
+      const make = el("button", "btn btn-primary", "Make a study set");
+      make.type = "button";
+      make.addEventListener("click", () => {
+        linkingTestId = test.id;
+        document.querySelector('.mode-switch [data-mode="ai"]').click();
+        $("source").value = [test.name, test.notes].filter(Boolean).join("\n");
+        $("source").dispatchEvent(new Event("input"));
+        $("source").focus();
+        $("make-form").scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+      actions.append(make);
+    }
+    if (sets.length) {
+      const pick = document.createElement("select");
+      pick.className = "test-select";
+      pick.setAttribute("aria-label", `Study set for ${test.name}`);
+      pick.append(new Option(linked ? "Change study set" : "Use a saved set", ""));
+      for (const s of sets) pick.append(new Option(s.title, s.title));
+      pick.addEventListener("change", () => {
+        if (!pick.value) return;
+        test.setTitle = pick.value;
+        savePlayer();
+        renderTests();
+      });
+      actions.append(pick);
+    }
+    const plan = el("button", "btn btn-quiet", "Add study sessions to calendar");
+    plan.type = "button";
+    plan.addEventListener("click", () => studyPlanFile(test));
+    actions.append(plan);
+    info.append(actions);
+    const remove = el("button", "test-remove", "×");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Remove ${test.name}`);
+    remove.addEventListener("click", () => {
+      player.tests = player.tests.filter((t) => t.id !== test.id);
+      savePlayer();
+      renderTests();
+    });
+    card.append(count, info, remove);
+    list.append(card);
+  }
+}
+
+function addTest(test) {
+  player.tests ||= [];
+  if (test.calendarId && player.tests.some((t) => t.calendarId === test.calendarId)) return;
+  player.tests.push({ id: newPlayerId(), ...test });
+}
+
+$("test-add-toggle").addEventListener("click", () => {
+  const form = $("test-add");
+  form.hidden = !form.hidden;
+  $("test-add-toggle").setAttribute("aria-expanded", String(!form.hidden));
+  if (!form.hidden) { $("test-date").min = todayISO(); $("test-name").focus(); }
+});
+$("test-add").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = $("test-name").value.trim();
+  const date = $("test-date").value;
+  const status = $("test-add-status");
+  status.className = "status error";
+  if (!name) { status.textContent = "Give the test a name."; return; }
+  if (!date || daysUntil(date) < 0) { status.textContent = "Pick a date from today on."; return; }
+  addTest({ name: name.slice(0, 80), date, source: "manual" });
+  savePlayer();
+  renderTests();
+  $("test-name").value = "";
+  $("test-date").value = "";
+  status.textContent = "";
+  $("test-add").hidden = true;
+  $("test-add-toggle").setAttribute("aria-expanded", "false");
+  fx.play("good");
+});
+
+async function readCalendar(token) {
+  const from = new Date();
+  const to = new Date(Date.now() + 45 * 86_400_000);
+  const url = "https://www.googleapis.com/calendar/v3/calendars/primary/events?" + new URLSearchParams({
+    timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: "true", orderBy: "startTime", maxResults: "250",
+  });
+  const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error("Couldn't read your calendar. Try connecting again.");
+  const { items = [] } = await res.json();
+  return items
+    .filter((ev) => ev.status !== "cancelled" && TEST_WORDS.test(ev.summary || ""))
+    .map((ev) => ({
+      calendarId: ev.id,
+      name: String(ev.summary).slice(0, 80),
+      date: ev.start?.date || (ev.start?.dateTime ? new Date(ev.start.dateTime).toLocaleDateString("en-CA") : ""),
+      notes: String(ev.description || "").replace(/<[^>]+>/g, " ").slice(0, 600),
+      source: "calendar",
+    }))
+    .filter((t) => t.date && daysUntil(t.date) >= 0);
+}
+
+function showCalendarPicker(found) {
+  const box = $("cal-pick");
+  box.hidden = false;
+  box.innerHTML = "";
+  const fresh = found.filter((t) => !(player.tests || []).some((x) => x.calendarId === t.calendarId));
+  if (!fresh.length) {
+    box.append(el("p", "", found.length
+      ? "You're already tracking every test in your calendar."
+      : "No tests found in the next 6 weeks. Events need a word like test, quiz, exam or midterm in the name."));
+    const ok = el("button", "btn", "OK");
+    ok.type = "button";
+    ok.addEventListener("click", () => { box.hidden = true; });
+    box.append(ok);
+    return;
+  }
+  box.append(el("p", "label", `Found ${fresh.length} test${fresh.length === 1 ? "" : "s"} in your calendar. Which ones should Cram Arcade track?`));
+  const list = el("div", "cal-list");
+  fresh.forEach((t, i) => {
+    const row = el("label", "cal-row");
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.checked = true;
+    check.dataset.i = i;
+    row.append(check, el("span", "", t.name), el("span", "muted small", prettyDate(t.date)));
+    list.append(row);
+  });
+  box.append(list);
+  const row = el("div", "maker-row");
+  const add = el("button", "btn btn-primary", "Track these tests");
+  add.type = "button";
+  add.addEventListener("click", () => {
+    list.querySelectorAll("input:checked").forEach((c) => addTest(fresh[Number(c.dataset.i)]));
+    savePlayer();
+    renderTests();
+    box.hidden = true;
+    fx.play("win");
+  });
+  const cancel = el("button", "btn btn-quiet", "Cancel");
+  cancel.type = "button";
+  cancel.addEventListener("click", () => { box.hidden = true; });
+  row.append(cancel, add);
+  box.append(row);
+}
+
+$("cal-connect").addEventListener("click", async () => {
+  const box = $("cal-pick");
+  const config = await getConfig();
+  try {
+    const google = await loadGoogle();
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: config.googleClientId,
+      scope: "https://www.googleapis.com/auth/calendar.readonly",
+      login_hint: account.profile?.email || undefined,
+      callback: async (resp) => {
+        if (resp.error) return;
+        box.hidden = false;
+        box.innerHTML = '<p class="muted">Looking for tests in your calendar…</p>';
+        try {
+          showCalendarPicker(await readCalendar(resp.access_token));
+        } catch (err) {
+          box.innerHTML = "";
+          box.append(el("p", "status error", err.message));
+        }
+      },
+    });
+    client.requestAccessToken();
+  } catch (err) {
+    box.hidden = false;
+    box.innerHTML = "";
+    box.append(el("p", "status error", err.message));
+  }
+});
+
+$("open-account").addEventListener("click", () => openSheet("account"));
+renderAccountChip();
+renderTests();
+getConfig().then((config) => {
+  $("cal-connect").hidden = !config.googleClientId;
+  if (!config.googleClientId) return;
+  pullSync().then(() => { renderAccountChip(); });
+});
+
 function openSheet(id) {
   const sheet = $(id);
   if (id === "shop") renderShop();
   if (id === "crew") renderCrew(true);
+  if (id === "account") renderAccount();
   if (sheet.showModal) sheet.showModal(); else sheet.setAttribute("open", "");
   fx.play("click");
 }
@@ -1306,6 +1808,7 @@ $("make-form").addEventListener("submit", async (e) => {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Something went wrong. Try again.");
     saveSet(data, "ai");
+    linkNewSet(data.title);
     loadSet(data, "ai");
     showView("cards");
     status.textContent = `Ready: ${data.cards.length} flashcards and ${data.quiz.length} quiz questions.`;
