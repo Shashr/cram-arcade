@@ -1,3 +1,4 @@
+// Cram Arcade © 2026 Shashank J Reddy. All rights reserved. See LICENSE.
 // Classrooms: a teacher assigns study sets, students join with a code, and the teacher
 // sees each student's progress plus the questions the class misses most.
 //

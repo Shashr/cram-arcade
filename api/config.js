@@ -1,3 +1,4 @@
+// Cram Arcade © 2026 Shashank J Reddy. All rights reserved. See LICENSE.
 // Tells the page which optional features this server has set up.
 // Client IDs are public by design (they're visible in every sign-in page).
 import { db } from "./_db.js";

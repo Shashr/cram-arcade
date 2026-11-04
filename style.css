@@ -1,3 +1,4 @@
+/* Cram Arcade © 2026 Shashank J Reddy. All rights reserved. Not licensed for reuse; see LICENSE. */
 /* Cram Arcade
    Concept: a night at the arcade. The page background is arcade carpet, the logo is a
    lit-up marquee sign, and each game is a big colored tile, like a cabinet in a row.
@@ -956,6 +957,21 @@ textarea:hover, .text-input:hover { border-color: var(--muted); }
 @keyframes shake { 0%, 100% { transform: none; } 20% { transform: translateX(-7px); } 40% { transform: translateX(7px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(3px); } }
 
 .foot { padding-block: 0 40px; font-size: 0.85rem; color: var(--carpet-muted); text-align: center; }
+.foot p { margin: 4px 0; }
+.foot a { color: var(--carpet-text); margin-left: 10px; text-underline-offset: 3px; }
+.foot a:first-child { margin-left: 0; }
+
+/* Terms and privacy pages */
+.doc-wrap { display: grid; gap: 16px; padding-block: 32px 24px; max-width: 760px; }
+.doc-back { color: var(--carpet-text); font-weight: 700; text-underline-offset: 3px; justify-self: start; }
+.doc { padding: clamp(20px, 4vw, 36px); line-height: 1.65; }
+.doc h1 { font-family: var(--sign); font-weight: 400; font-size: clamp(1.6rem, 5vw, 2.2rem); margin: 0; line-height: 1.1; }
+.doc-date { color: var(--muted); margin: 6px 0 18px; }
+.doc h2 { font-size: 1.15rem; margin: 26px 0 6px; }
+.doc p, .doc li { max-width: 68ch; }
+.doc ul { padding-left: 1.2em; }
+.doc li { margin-bottom: 6px; }
+.doc a { color: var(--text); text-underline-offset: 3px; text-decoration-thickness: 2px; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }

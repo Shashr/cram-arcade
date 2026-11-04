@@ -1,3 +1,4 @@
+// Cram Arcade © 2026 Shashank J Reddy. All rights reserved. See LICENSE.
 // Sign in with Microsoft or Google, and keep a player's progress in the cloud so it
 // follows them between devices.
 //

@@ -1,3 +1,4 @@
+// Cram Arcade © 2026 Shashank J Reddy. All rights reserved. Not licensed for reuse; see LICENSE.
 // Cram Arcade front end: flashcards, quiz, and a matching game.
 
 const EXAMPLE_SET = {

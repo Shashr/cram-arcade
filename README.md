@@ -164,3 +164,7 @@ _Write this part yourself: what was hard, what you'd change, features you want t
 ## Credits
 
 Built with help from Claude (Anthropic) as a coding assistant.
+
+## License
+
+© 2026 Shashank J Reddy. All rights reserved. This code is not open source: it may not be copied, modified, distributed or sold without written permission. See [LICENSE](LICENSE), and the app's [Terms of Use](terms.html) and [Privacy Policy](privacy.html).

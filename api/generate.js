@@ -1,3 +1,4 @@
+// Cram Arcade © 2026 Shashank J Reddy. All rights reserved. See LICENSE.
 // Serverless function: turns notes or a topic into a study set using Claude.
 // Runs on the server, so the API key is never sent to the browser.
 
