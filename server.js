@@ -1,3 +1,4 @@
+// Cram Arcade © 2026 Shashank J Reddy. All rights reserved. See LICENSE.
 // Local development server: run `npm start`, then open http://localhost:3000
 // (On Vercel this file isn't used; Vercel serves the files and runs the api/ functions itself.)
 import "./load-env.js"; // must come first: reads .env before the api/ files load

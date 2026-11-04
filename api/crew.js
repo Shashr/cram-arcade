@@ -1,3 +1,4 @@
+// Cram Arcade © 2026 Shashank J Reddy. All rights reserved. See LICENSE.
 // Crew leaderboards: friends join the same 5-letter crew code and compete for tickets.
 //
 // Storage: see _db.js (a Redis database online, or memory in test mode).

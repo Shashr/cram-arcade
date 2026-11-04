@@ -1,3 +1,4 @@
+// Cram Arcade © 2026 Shashank J Reddy. All rights reserved. See LICENSE.
 // Shared storage for the api/ functions. (Files starting with _ aren't web routes on Vercel.)
 //
 // Online: a Redis database (free on Upstash, one click from Vercel's Storage tab).

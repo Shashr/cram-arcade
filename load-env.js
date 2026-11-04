@@ -1,3 +1,4 @@
+// Cram Arcade © 2026 Shashank J Reddy. All rights reserved. See LICENSE.
 // Loads settings (API keys etc.) from a local .env file into process.env.
 // Only used by server.js on your computer; on Vercel you set these in the project settings.
 import { existsSync, readFileSync } from "node:fs";
