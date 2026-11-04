@@ -14,7 +14,10 @@ import classroom from "./api/classroom.js";
 const root = path.dirname(fileURLToPath(import.meta.url));
 const apis = { "/api/generate": generate, "/api/crew": crew, "/api/account": account, "/api/config": config, "/api/classroom": classroom };
 
-const types = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml" };
+const types = {
+  ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml",
+  ".png": "image/png", ".webmanifest": "application/manifest+json", ".json": "application/json",
+};
 
 const server = http.createServer(async (req, res) => {
   // Small helpers so the api/ functions work the same way they do on Vercel.

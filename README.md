@@ -127,6 +127,35 @@ calendar permission. Sign-in by itself (name, email, picture) doesn't need a rev
 The calendar is only read in the browser: event names and dates of tests you choose to
 track are saved, nothing else.
 
+## Install it as an app (Android)
+
+Cram Arcade is an installable web app: it has an app icon, opens full-screen, and works
+offline (study sets you've saved still play with no internet).
+
+- **On a phone:** open the site in Chrome and tap **Install app** at the top (or Chrome's
+  menu → **Install app** / **Add to Home screen**).
+- **On a computer:** Chrome or Edge shows an install icon in the address bar.
+
+`manifest.webmanifest` describes the app, `sw.js` handles offline use, and the icons are in
+`icons/`. When you change the app, bump `VERSION` in `sw.js` so installed copies refresh.
+
+### Publishing on Google Play
+
+1. **Put the site online** on Vercel first (see Deploy). Google Play needs a real https link.
+2. **Create a Play Console account** at [play.google.com/console](https://play.google.com/console):
+   one-time US$25 fee, and the account owner must be 18+ with ID (a parent can own it).
+3. **Package the app** at [pwabuilder.com](https://www.pwabuilder.com): enter your Vercel link,
+   choose **Package for stores → Android**, and download the zip. It contains the `.aab` file
+   to upload, your **signing key** (back it up somewhere safe; you need it for every update),
+   and an `assetlinks.json` file.
+4. **Prove you own the site:** put that `assetlinks.json` in this project at
+   `.well-known/assetlinks.json` and push. This makes the app open without a browser bar.
+5. **In Play Console:** create the app, fill in the store listing (description, screenshots,
+   icon), content rating, target audience, data safety form, and a privacy policy link.
+6. **Closed test:** new personal accounts must run a closed test with **at least 12 testers
+   opted in for 14 days in a row** before going public. Classmates make great testers.
+7. **Apply for production** from the Dashboard. Google usually replies within a week.
+
 ## What I learned / what's next
 
 _Write this part yourself: what was hard, what you'd change, features you want to add

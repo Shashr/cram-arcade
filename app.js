@@ -3166,5 +3166,26 @@ $("make-form").addEventListener("submit", async (e) => {
   }
 });
 
+/* ---------- Installable app ----------
+   The service worker (sw.js) lets the app open offline. On Android/Chrome, the browser
+   offers an install prompt, which we show as an "Install app" button. */
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  window.addEventListener("load", () => { navigator.serviceWorker.register("/sw.js").catch(() => {}); });
+}
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  $("install-btn").hidden = false;
+});
+$("install-btn").addEventListener("click", async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice.catch(() => null);
+  installPrompt = null;
+  $("install-btn").hidden = true;
+});
+window.addEventListener("appinstalled", () => { $("install-btn").hidden = true; });
+
 loadSet(EXAMPLE_SET, "example");
 renderSaved();
