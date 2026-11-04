@@ -714,6 +714,12 @@ function mergeData(local, cloud) {
   const other = base === cloud.player ? local.player : cloud.player;
   const tests = [...(base.tests || [])];
   for (const t of other.tests || []) if (!tests.some((x) => x.id === t.id)) tests.push(t);
+  const sessions = [...(base.sessions || [])];
+  for (const t of other.sessions || []) {
+    const mine = sessions.find((x) => x.id === t.id);
+    if (!mine) sessions.push(t);
+    else if (t.done) mine.done = true; // finished on either device counts
+  }
   const sets = [...(cloud.sets || [])];
   for (const s of local.sets || []) if (!sets.some((x) => x.title === s.title)) sets.push(s);
   const bests = { ...(cloud.bests || {}) };
@@ -723,6 +729,7 @@ function mergeData(local, cloud) {
       ...base,
       plates: [...new Set([...(base.plates || []), ...(other.plates || [])])],
       tests,
+      sessions,
       name: base.name || other.name,
       pending: local.player.pending, // tickets this device hasn't sent to the crew yet
       pendingWins: local.player.pendingWins,
@@ -739,6 +746,8 @@ function applyData(data) {
   renderTickets();
   renderSaved();
   renderTests();
+  renderReminders();
+  if ($("calendar").open) renderCalendar();
   showBest();
 }
 
@@ -909,25 +918,26 @@ function linkNewSet(title) {
   linkingTestId = null;
 }
 
-// A calendar file with a 30-minute study session each evening before the test.
+// A calendar file (.ics) with the test's planned study sessions, for a phone's calendar app.
 function studyPlanFile(test) {
-  const days = Math.min(5, Math.max(1, daysUntil(test.date)));
   const pad = (n) => String(n).padStart(2, "0");
   const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
-  const [y, m, d] = test.date.split("-").map(Number);
   const escape = (s) => String(s).replace(/[\\;,]/g, (c) => "\\" + c).replace(/\n/g, "\\n");
   const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Cram Arcade//Study plan//EN", "CALSCALE:GREGORIAN"];
-  for (let i = days; i >= 1; i--) {
-    const day = new Date(y, m - 1, d - i);
-    const date = `${day.getFullYear()}${pad(day.getMonth() + 1)}${pad(day.getDate())}`;
+  for (const session of sessionsFor(test.id)) {
+    const start = sessionTime(session);
+    const end = new Date(start.getTime() + 30 * 60000);
+    const fmt = (t) => `${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}T${pad(t.getHours())}${pad(t.getMinutes())}00`;
+    const left = daysUntil(test.date) - daysUntil(session.date);
     lines.push(
       "BEGIN:VEVENT",
-      `UID:cram-${test.id}-${date}@cramarcade`,
+      `UID:cram-${session.id}@cramarcade`,
       `DTSTAMP:${stamp}`,
-      `DTSTART:${date}T190000`,
-      `DTEND:${date}T193000`,
+      `DTSTART:${fmt(start)}`,
+      `DTEND:${fmt(end)}`,
       `SUMMARY:${escape(`Study for ${test.name}`)}`,
-      `DESCRIPTION:${escape(`${i === 1 ? "Last session: beat the boss!" : `${i} days to go.`} ${location.origin}`)}`,
+      `DESCRIPTION:${escape(`${left === 1 ? "Last session: beat the boss!" : `${left} days to go.`} ${location.origin}`)}`,
+      "BEGIN:VALARM", "ACTION:DISPLAY", `DESCRIPTION:${escape(`Study for ${test.name}`)}`, "TRIGGER:-PT10M", "END:VALARM",
       "END:VEVENT",
     );
   }
@@ -1001,18 +1011,39 @@ function renderTests() {
       });
       actions.append(pick);
     }
-    const plan = el("button", "btn btn-quiet", "Add study sessions to calendar");
-    plan.type = "button";
-    plan.addEventListener("click", () => studyPlanFile(test));
-    actions.append(plan);
+    const planned = sessionsFor(test.id);
+    if (!planned.length && days > 0) {
+      const plan = el("button", "btn", "Plan study sessions");
+      plan.type = "button";
+      plan.addEventListener("click", () => {
+        const added = planSessions(test);
+        fx.play(added ? "good" : "bad");
+        renderTests();
+        renderReminders();
+      });
+      actions.append(plan);
+    }
     info.append(actions);
+    if (planned.length) {
+      const next = planned.find((x) => !x.done && sessionTime(x) > Date.now() - 3 * 3600_000);
+      const doneCount = planned.filter((x) => x.done).length;
+      const line = el("p", "small plan-line");
+      line.append(`${doneCount} of ${planned.length} study sessions done.${next ? ` Next: ${sessionLabel(next)}.` : ""} `);
+      const ics = el("button", "link-btn", "Add them to my phone's calendar");
+      ics.type = "button";
+      ics.addEventListener("click", () => studyPlanFile(test));
+      line.append(ics);
+      info.append(line);
+    }
     const remove = el("button", "test-remove", "×");
     remove.type = "button";
     remove.setAttribute("aria-label", `Remove ${test.name}`);
     remove.addEventListener("click", () => {
       player.tests = player.tests.filter((t) => t.id !== test.id);
+      player.sessions = (player.sessions || []).filter((x) => x.testId !== test.id);
       savePlayer();
       renderTests();
+      renderReminders();
     });
     card.append(count, info, remove);
     list.append(card);
@@ -1144,9 +1175,343 @@ $("cal-connect").addEventListener("click", async () => {
   }
 });
 
+/* ---------- Study sessions, in-app calendar and reminders ----------
+   Sessions are short study blocks (default 7 PM) on the days before a test. They show
+   on the calendar, the reminder banner, and a pop-up when it's time (while the app is
+   open). Finishing one earns tickets. */
+const SESSION_TICKETS = 15;
+
+function sessionTime(s) {
+  const [y, m, d] = s.date.split("-").map(Number);
+  const [hh, mm] = (s.time || "19:00").split(":").map(Number);
+  return new Date(y, m - 1, d, hh, mm);
+}
+function timeLabel(s) {
+  return sessionTime(s).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+function sessionLabel(s) {
+  const days = daysUntil(s.date);
+  const day = days === 0 ? "today" : days === 1 ? "tomorrow" : prettyDate(s.date);
+  return `${day} at ${timeLabel(s)}`;
+}
+function sessionsFor(testId) {
+  return (player.sessions || []).filter((s) => s.testId === testId).sort((a, b) => sessionTime(a) - sessionTime(b));
+}
+function testFor(session) {
+  return (player.tests || []).find((t) => t.id === session.testId);
+}
+function sessionTitle(s) {
+  const test = testFor(s);
+  return test ? `Study for ${test.name}` : s.title || "Study session";
+}
+function isoOf(date) {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+// An evening session on each of the (up to 5) days before the test, skipping times already past.
+function planSessions(test) {
+  player.sessions ||= [];
+  const [y, m, d] = test.date.split("-").map(Number);
+  let added = 0;
+  for (let i = Math.min(5, daysUntil(test.date)); i >= 1; i--) {
+    const date = isoOf(new Date(y, m - 1, d - i));
+    const s = { id: newPlayerId(), testId: test.id, date, time: "19:00", done: false };
+    if (sessionTime(s) < Date.now()) {
+      // Today and it's already past 7: offer a session in 15 minutes instead.
+      if (daysUntil(date) !== 0) continue;
+      const soon = new Date(Date.now() + 15 * 60000);
+      s.time = `${String(soon.getHours()).padStart(2, "0")}:${String(soon.getMinutes()).padStart(2, "0")}`;
+      if (isoOf(soon) !== date) continue;
+    }
+    player.sessions.push(s);
+    added++;
+  }
+  savePlayer();
+  if (added) ticketToastText(`Planned ${added} study session${added === 1 ? "" : "s"}. Finish each one for ${SESSION_TICKETS} tickets.`);
+  return added;
+}
+
+function ticketToastText(text) {
+  const toast = $("ticket-toast");
+  toast.textContent = text;
+  toast.classList.remove("show");
+  void toast.offsetWidth;
+  toast.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove("show"), 2600);
+}
+
+function studyFor(session) {
+  const test = session && testFor(session);
+  const set = test && savedSets().find((x) => x.title === test.setTitle);
+  if (set) {
+    loadSet(set, set.kind);
+    showView(test && daysUntil(test.date) <= 1 ? "boss" : "cards");
+    document.querySelector(".set").scrollIntoView({ behavior: "smooth", block: "start" });
+  } else if (test) {
+    // No study set yet: start making one for this test.
+    linkingTestId = test.id;
+    document.querySelector('.mode-switch [data-mode="ai"]').click();
+    $("source").value = [test.name, test.notes].filter(Boolean).join("\n");
+    $("source").dispatchEvent(new Event("input"));
+    $("make-form").scrollIntoView({ behavior: "smooth", block: "center" });
+  } else {
+    document.querySelector(".set").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function finishSession(session) {
+  if (session.done || daysUntil(session.date) !== 0) return;
+  session.done = true;
+  savePlayer();
+  confetti(60);
+  award(SESSION_TICKETS, "for finishing a study session", "session");
+  renderReminders();
+  renderTests();
+  if ($("calendar").open) renderCalendar();
+}
+
+/* ----- Reminder banner at the top of the page ----- */
+function reminderItems() {
+  const today = todayISO();
+  const hidden = player.hiddenReminders?.day === today ? player.hiddenReminders.ids : [];
+  const items = [];
+  for (const s of (player.sessions || []).filter((x) => x.date === today && !x.done)) {
+    items.push({ id: s.id, kind: "session", session: s, when: sessionTime(s) });
+  }
+  for (const t of upcomingTests().filter((x) => daysUntil(x.date) <= 1)) {
+    items.push({ id: t.id, kind: "test", test: t, when: new Date(0) });
+  }
+  return items.filter((i) => !hidden.includes(i.id)).sort((a, b) => a.when - b.when).slice(0, 3);
+}
+
+function renderReminders() {
+  const box = $("reminders");
+  box.innerHTML = "";
+  for (const item of reminderItems()) {
+    const card = el("div", `reminder reminder-${item.kind}`);
+    const text = el("p", "reminder-text");
+    const actions = el("div", "reminder-actions");
+    if (item.kind === "session") {
+      const s = item.session;
+      const started = sessionTime(s) <= Date.now();
+      text.append(el("strong", "", started ? "Study time!" : `Study session at ${timeLabel(s)}:`), ` ${sessionTitle(s)}.`);
+      const go = el("button", "btn btn-primary", "Study now");
+      go.type = "button";
+      go.addEventListener("click", () => studyFor(s));
+      const done = el("button", "btn btn-good", `Done (+${SESSION_TICKETS})`);
+      done.type = "button";
+      done.addEventListener("click", () => finishSession(s));
+      actions.append(go, done);
+    } else {
+      const t = item.test;
+      const days = daysUntil(t.date);
+      text.append(el("strong", "", days === 0 ? `${t.name} is today.` : `${t.name} is tomorrow.`),
+        days === 0 ? " One last boss fight to warm up?" : " Beat the boss tonight and you're ready.");
+      const go = el("button", "btn btn-primary", t.setTitle ? "Fight the boss" : "Make a study set");
+      go.type = "button";
+      go.addEventListener("click", () => {
+        const set = savedSets().find((x) => x.title === t.setTitle);
+        if (set) { loadSet(set, set.kind); showView("boss"); document.querySelector(".set").scrollIntoView({ behavior: "smooth", block: "start" }); }
+        else studyFor({ testId: t.id });
+      });
+      actions.append(go);
+    }
+    const hide = el("button", "reminder-hide", "×");
+    hide.type = "button";
+    hide.setAttribute("aria-label", "Hide this reminder for today");
+    hide.addEventListener("click", () => {
+      const today = todayISO();
+      if (player.hiddenReminders?.day !== today) player.hiddenReminders = { day: today, ids: [] };
+      player.hiddenReminders.ids.push(item.id);
+      savePlayer();
+      renderReminders();
+    });
+    card.append(text, actions, hide);
+    box.append(card);
+  }
+}
+
+/* ----- Pop-up when a session starts (while the app is open) ----- */
+let popSession = null;
+function showReminderPop(session) {
+  popSession = session;
+  $("reminder-pop-text").textContent = `Study time! ${sessionTitle(session)}. Finish this session for ${SESSION_TICKETS} tickets.`;
+  $("reminder-pop").hidden = false;
+  fx.play("enrage");
+  if (document.hidden && "Notification" in window && Notification.permission === "granted") {
+    try { new Notification("Cram Arcade: study time!", { body: sessionTitle(session) }); } catch { /* ignore */ }
+  }
+}
+function checkReminders() {
+  const now = Date.now();
+  for (const s of player.sessions || []) {
+    const t = sessionTime(s).getTime();
+    if (!s.done && !s.notified && t <= now && now - t < 2 * 3600_000) {
+      s.notified = true;
+      savePlayer();
+      showReminderPop(s);
+      break;
+    }
+  }
+  renderReminders();
+}
+$("reminder-go").addEventListener("click", () => {
+  $("reminder-pop").hidden = true;
+  studyFor(popSession);
+});
+$("reminder-snooze").addEventListener("click", () => {
+  $("reminder-pop").hidden = true;
+  if (!popSession) return;
+  const later = new Date(Date.now() + 10 * 60000);
+  if (isoOf(later) === popSession.date) {
+    popSession.time = `${String(later.getHours()).padStart(2, "0")}:${String(later.getMinutes()).padStart(2, "0")}`;
+    popSession.notified = false;
+    savePlayer();
+  }
+  renderReminders();
+});
+
+function renderNotifyBtn() {
+  const btn = $("notify-btn");
+  btn.hidden = !("Notification" in window) || Notification.permission !== "default";
+}
+$("notify-btn").addEventListener("click", async () => {
+  try { await Notification.requestPermission(); } catch { /* ignore */ }
+  renderNotifyBtn();
+});
+
+/* ----- Month calendar ----- */
+const cal = { month: null, selected: null };
+function renderCalendar() {
+  const today = todayISO();
+  cal.selected ||= today;
+  if (!cal.month) { const n = new Date(); cal.month = new Date(n.getFullYear(), n.getMonth(), 1); }
+  const year = cal.month.getFullYear();
+  const month = cal.month.getMonth();
+  $("cal-month").textContent = cal.month.toLocaleDateString([], { month: "long", year: "numeric" });
+  const grid = $("cal-grid");
+  grid.innerHTML = "";
+  const start = new Date(year, month, 1 - new Date(year, month, 1).getDay()); // start on Sunday
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const head = el("span", "cal-dow", d.toLocaleDateString([], { weekday: "short" }).slice(0, 3));
+    head.setAttribute("role", "columnheader");
+    grid.append(head);
+  }
+  const tests = player.tests || [];
+  const sessions = player.sessions || [];
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    if (i >= 35 && d.getMonth() !== month) break; // drop a 6th row that's all next month
+    const iso = isoOf(d);
+    const cell = el("button", "cal-cell");
+    cell.type = "button";
+    cell.setAttribute("role", "gridcell");
+    if (d.getMonth() !== month) cell.classList.add("other");
+    if (iso === today) cell.classList.add("today");
+    if (iso === cal.selected) cell.classList.add("selected");
+    if (iso < today) cell.classList.add("past");
+    cell.append(el("span", "cal-num", String(d.getDate())));
+    const dayTests = tests.filter((t) => t.date === iso);
+    const daySessions = sessions.filter((s) => s.date === iso);
+    const marks = el("span", "cal-marks");
+    for (const t of dayTests) marks.append(el("span", "cal-chip chip-test", t.name));
+    for (const s of daySessions) marks.append(el("span", `cal-chip chip-session${s.done ? " done" : ""}`, s.done ? "Studied" : `Study ${timeLabel(s)}`));
+    cell.append(marks);
+    const label = [prettyDate(iso), ...dayTests.map((t) => t.name), ...daySessions.map((s) => sessionTitle(s))].join(", ");
+    cell.setAttribute("aria-label", label);
+    cell.addEventListener("click", () => { cal.selected = iso; renderCalendar(); });
+    grid.append(cell);
+  }
+  renderCalDay();
+  renderNotifyBtn();
+}
+
+function renderCalDay() {
+  const iso = cal.selected;
+  const box = $("cal-day");
+  box.innerHTML = "";
+  const days = daysUntil(iso);
+  box.append(el("h3", "cal-day-title", days === 0 ? `Today, ${prettyDate(iso)}` : prettyDate(iso)));
+  const list = el("div", "cal-items");
+  for (const t of (player.tests || []).filter((x) => x.date === iso)) {
+    const row = el("div", "cal-item item-test");
+    row.append(el("span", "cal-item-kind", "Test"), el("strong", "", t.name));
+    const del = el("button", "test-remove", "×");
+    del.type = "button";
+    del.setAttribute("aria-label", `Remove ${t.name}`);
+    del.addEventListener("click", () => {
+      player.tests = player.tests.filter((x) => x.id !== t.id);
+      player.sessions = (player.sessions || []).filter((x) => x.testId !== t.id);
+      savePlayer(); renderCalendar(); renderTests(); renderReminders();
+    });
+    row.append(del);
+    list.append(row);
+  }
+  for (const s of (player.sessions || []).filter((x) => x.date === iso).sort((a, b) => sessionTime(a) - sessionTime(b))) {
+    const row = el("div", `cal-item item-session${s.done ? " done" : ""}`);
+    row.append(el("span", "cal-item-kind", timeLabel(s)), el("strong", "", sessionTitle(s)));
+    if (s.done) row.append(el("span", "done-tag", "Done"));
+    else if (days === 0) {
+      const done = el("button", "btn btn-good small-btn", `Done (+${SESSION_TICKETS})`);
+      done.type = "button";
+      done.addEventListener("click", () => finishSession(s));
+      row.append(done);
+    }
+    const del = el("button", "test-remove", "×");
+    del.type = "button";
+    del.setAttribute("aria-label", `Remove ${sessionTitle(s)}`);
+    del.addEventListener("click", () => {
+      player.sessions = player.sessions.filter((x) => x.id !== s.id);
+      savePlayer(); renderCalendar(); renderTests(); renderReminders();
+    });
+    row.append(del);
+    list.append(row);
+  }
+  if (!list.children.length) list.append(el("p", "muted small", days < 0 ? "Nothing happened this day." : "Nothing planned yet."));
+  box.append(list);
+  if (days < 0) return;
+
+  const forms = el("div", "cal-forms");
+  const testForm = el("form", "cal-form");
+  testForm.innerHTML = `<label class="label" for="cal-test-name">Add a test this day</label>
+    <div class="cal-form-row"><input id="cal-test-name" class="text-input" maxlength="80" placeholder="Bio unit 4 test" autocomplete="off"><button class="btn" type="submit">Add test</button></div>`;
+  testForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const name = testForm.querySelector("input").value.trim();
+    if (!name) return testForm.querySelector("input").focus();
+    addTest({ name: name.slice(0, 80), date: iso, source: "manual" });
+    savePlayer(); fx.play("good"); renderCalendar(); renderTests(); renderReminders();
+  });
+  const sessionForm = el("form", "cal-form");
+  sessionForm.innerHTML = `<label class="label" for="cal-session-time">Add a study session</label>
+    <div class="cal-form-row"><input id="cal-session-time" class="text-input" type="time" value="19:00" aria-label="Start time">
+    <select id="cal-session-test" class="test-select" aria-label="Which test"></select><button class="btn" type="submit">Add session</button></div>`;
+  const pick = sessionForm.querySelector("select");
+  pick.append(new Option("General study", ""));
+  for (const t of upcomingTests().filter((x) => x.date >= iso)) pick.append(new Option(`For ${t.name}`, t.id));
+  sessionForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const time = sessionForm.querySelector("input").value || "19:00";
+    player.sessions ||= [];
+    player.sessions.push({ id: newPlayerId(), testId: pick.value || null, title: "Study session", date: iso, time, done: false });
+    savePlayer(); fx.play("good"); renderCalendar(); renderTests(); renderReminders();
+  });
+  forms.append(testForm, sessionForm);
+  box.append(forms);
+}
+
+$("cal-prev").addEventListener("click", () => { cal.month = new Date(cal.month.getFullYear(), cal.month.getMonth() - 1, 1); renderCalendar(); });
+$("cal-next").addEventListener("click", () => { cal.month = new Date(cal.month.getFullYear(), cal.month.getMonth() + 1, 1); renderCalendar(); });
+$("open-calendar").addEventListener("click", () => openSheet("calendar"));
+
 $("open-account").addEventListener("click", () => openSheet("account"));
 renderAccountChip();
 renderTests();
+checkReminders();
+setInterval(checkReminders, 20_000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkReminders(); });
 getConfig().then((config) => {
   $("cal-connect").hidden = !config.googleClientId;
   if (!config.googleClientId) return;
@@ -1158,6 +1523,7 @@ function openSheet(id) {
   if (id === "shop") renderShop();
   if (id === "crew") renderCrew(true);
   if (id === "account") renderAccount();
+  if (id === "calendar") renderCalendar();
   if (sheet.showModal) sheet.showModal(); else sheet.setAttribute("open", "");
   fx.play("click");
 }
