@@ -16,8 +16,8 @@ Paste your class notes or type a topic, and Cram Arcade uses AI (Claude) to turn
 - **Tickets and the prize counter**: win arcade tickets in every game (most from boss
   battles) and spend them on power-ups (extra heart, time freeze, 50/50) and nameplates.
   Replaying the same set on the same day earns fewer tickets.
-- **Sign in with Google** to keep tickets, sets, tests and records on every device.
-- **Upcoming tests**: connect Google Calendar (read-only) to find tests automatically, or add
+- **Sign in with Microsoft or Google** to keep tickets, sets, tests and records on every device.
+- **Upcoming tests**: connect Outlook or Google Calendar (read-only) to find tests automatically, or add
   them by hand. Each test gets a countdown, a linked study set, and a downloadable study plan
   (a calendar file with an evening session for each of the days before the test).
 - **Calendar and study sessions**: a month calendar inside the app for tests and study
@@ -75,6 +75,27 @@ runs in **test mode** (only on one computer, wiped when the server restarts).
 `api/crew.js` also accepts `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` if you
 create the database on upstash.com directly. Scores come from players' browsers, so a
 determined friend could fake theirs; the server caps how many tickets one report can add.
+
+### Microsoft sign-in, Outlook and Teams
+
+Optional. Lets students and teachers sign in with their school Microsoft account and find
+tests in their Outlook calendar. "Share to Teams" and join links work without any setup.
+
+1. Go to the [Microsoft Entra admin center](https://entra.microsoft.com) (a free personal
+   Microsoft account works) and open **App registrations → New registration**.
+2. Name: "Cram Arcade". **Supported account types**: "Accounts in any organizational
+   directory and personal Microsoft accounts".
+3. **Redirect URI**: choose **Single-page application (SPA)** and enter
+   `http://localhost:3000/`. Later add your Vercel link too (like `https://cram-arcade.vercel.app/`)
+   under **Authentication**. It must be the SPA type, ending with `/`.
+4. **API permissions → Add a permission → Microsoft Graph → Delegated**: `User.Read`
+   (already there) and `Calendars.Read`.
+5. Copy the **Application (client) ID** from the Overview page into `.env` and Vercel as
+   `MICROSOFT_CLIENT_ID`, and set `SESSION_SECRET` (any long random text).
+
+**School accounts:** many school boards only allow apps their IT team has approved. If a
+student sees "Your school needs to approve Cram Arcade", a teacher can ask IT to grant
+admin consent for the app (they'll need the client ID). Personal accounts work right away.
 
 ### Google sign-in and calendar
 

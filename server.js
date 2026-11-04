@@ -31,7 +31,7 @@ const server = http.createServer(async (req, res) => {
     return api(req, res);
   }
 
-  const urlPath = req.url === "/" ? "/index.html" : req.url.split("?")[0];
+  const urlPath = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
   const file = path.join(root, path.normalize(urlPath));
   if (!file.startsWith(root) || !types[path.extname(file)]) return res.status(404).end("Not found");
   try {
