@@ -28,8 +28,13 @@ const keys = (code) => ({
   sets: `class:${code}:sets`,
   students: `class:${code}:students`,
   progress: `class:${code}:progress`,
-  missed: `class:${code}:missed`,
+  missed: `class:${code}:missed`, // "set␟question" -> times answered wrong (whole class)
+  asked: `class:${code}:asked`, // "set␟question" -> times asked (whole class)
+  history: `class:${code}:history`, // student -> list of attempts over time
+  studentMissed: `class:${code}:smissed`, // "student␟set␟question" -> times wrong
 });
+const SEP = "\u001f";
+const MAX_HISTORY = 200;
 
 function clean(text, max) {
   return String(text || "").replace(/[\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
@@ -189,8 +194,27 @@ export default async function handler(req, res) {
       try { mine = JSON.parse(all[body.playerId] || "{}"); } catch { /* start fresh */ }
       mine[setTitle] = updateProgress(mine[setTitle], body);
       await db.hset(k.progress, body.playerId, JSON.stringify(mine));
-      const missed = (Array.isArray(body.missed) ? body.missed : []).slice(0, 30).map((m) => clean(m, 200)).filter(Boolean);
-      await Promise.all(missed.map((m) => db.hincrby(k.missed, `${setTitle}\u001f${m}`, 1)));
+      const list = (v) => [...new Set((Array.isArray(v) ? v : []).slice(0, 60).map((m) => clean(m, 200)).filter(Boolean))];
+      const missed = list(body.missed);
+      const asked = list(body.asked);
+      for (const m of missed) if (!asked.includes(m)) asked.push(m);
+      await Promise.all([
+        ...missed.map((m) => db.hincrby(k.missed, `${setTitle}${SEP}${m}`, 1)),
+        ...missed.map((m) => db.hincrby(k.studentMissed, `${body.playerId}${SEP}${setTitle}${SEP}${m}`, 1)),
+        ...asked.map((m) => db.hincrby(k.asked, `${setTitle}${SEP}${m}`, 1)),
+      ]);
+      // Attempt log for the teacher's charts (quiz and boss only; flashcards are a running count).
+      if (body.kind !== "cards") {
+        const raw = (await db.hgetall(k.history))[body.playerId];
+        let log = [];
+        try { log = raw ? JSON.parse(raw) : []; } catch { /* start fresh */ }
+        const total = Math.max(1, Math.min(100, Math.round(Number(body.total) || 1)));
+        const pct = body.kind === "quiz"
+          ? Math.round((Math.max(0, Math.min(total, Number(body.score) || 0)) / total) * 100)
+          : Math.max(0, Math.min(100, Math.round(Number(body.accuracy) || 0)));
+        log.push({ t: Date.now(), set: setTitle, kind: body.kind, pct, ...(body.kind === "boss" ? { won: !!body.won } : {}) });
+        await db.hset(k.history, body.playerId, JSON.stringify(log.slice(-MAX_HISTORY)));
+      }
       await touch(code);
       return res.status(200).json({ ok: true });
     }
@@ -200,18 +224,30 @@ export default async function handler(req, res) {
     if (!found) return res.status(403).json({ error: "That class code and teacher key don't match." });
 
     if (body.action === "dashboard") {
-      const [students, progress, missed] = await Promise.all([db.hgetall(k.students), db.hgetall(k.progress), db.hgetall(k.missed)]);
+      const [students, progress, missed, asked, history, studentMissed] = await Promise.all([
+        db.hgetall(k.students), db.hgetall(k.progress), db.hgetall(k.missed),
+        db.hgetall(k.asked), db.hgetall(k.history), db.hgetall(k.studentMissed),
+      ]);
+      const parse = (raw, fallback) => { try { return raw ? JSON.parse(raw) : fallback; } catch { return fallback; } };
+      const missedBy = {};
+      for (const [key, count] of Object.entries(studentMissed)) {
+        const [id, set, prompt] = key.split(SEP);
+        (missedBy[id] ||= []).push({ set, prompt, count: Number(count) });
+      }
       const list = Object.entries(students).map(([id, raw]) => {
-        let s = {};
-        let p = {};
-        try { s = JSON.parse(raw); } catch { /* ignore */ }
-        try { p = JSON.parse(progress[id] || "{}"); } catch { /* ignore */ }
-        return { id, name: s.name || "Student", joined: s.joined || 0, progress: p };
+        const s = parse(raw, {});
+        return {
+          id, name: s.name || "Student", joined: s.joined || 0,
+          progress: parse(progress[id], {}),
+          history: parse(history[id], []),
+          missed: (missedBy[id] || []).sort((a, b) => b.count - a.count).slice(0, 40),
+        };
       });
       const trouble = Object.entries(missed).map(([key, count]) => {
-        const [set, prompt] = key.split("\u001f");
-        return { set, prompt, count: Number(count) };
-      }).sort((a, b) => b.count - a.count).slice(0, 100);
+        const [set, prompt] = key.split(SEP);
+        const times = Math.max(Number(count), Number(asked[key] || 0));
+        return { set, prompt, count: Number(count), asked: times, rate: Math.round((Number(count) / times) * 100) };
+      }).sort((a, b) => b.rate - a.rate || b.count - a.count).slice(0, 150);
       return res.status(200).json({ ...publicInfo(code, found), students: list, trouble, database: db.mode });
     }
 
@@ -234,6 +270,9 @@ export default async function handler(req, res) {
       if (!validPlayer(body.playerId)) return res.status(400).json({ error: "Missing student." });
       await db.hdel(k.students, body.playerId);
       await db.hdel(k.progress, body.playerId);
+      await db.hdel(k.history, body.playerId);
+      const theirs = Object.keys(await db.hgetall(k.studentMissed)).filter((key) => key.startsWith(`${body.playerId}${SEP}`));
+      await Promise.all(theirs.map((key) => db.hdel(k.studentMissed, key)));
       return res.status(200).json({ ok: true });
     }
 

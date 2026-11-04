@@ -28,6 +28,10 @@ Paste your class notes or type a topic, and Cram Arcade uses AI (Claude) to turn
   6-character code. Students join with the code and their first name, and their quiz, boss
   battle and flashcard results on the assigned sets show up on the teacher's dashboard, along
   with **trouble spots**: the questions the class misses most. Uses the same database as crews.
+  The dashboard has an **Overview** (games played per day, students by best quiz score),
+  a **Students** table where each name opens that student's page (scores over time, the
+  questions they miss, recent games), and a **Questions** tab ranking every question by
+  how often it's answered wrong.
 - **Crew leaderboards**: start a crew, share the 5-letter code, and compete with friends
   for the most tickets this week and all time.
 
