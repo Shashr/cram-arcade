@@ -1,0 +1,109 @@
+// Sign in with Google, and keep a player's progress in the cloud so it follows them
+// between devices.
+//
+// Requests:
+//   POST { action: "signin", credential }   credential = the ID token from Google's sign-in button
+//        -> { session, profile, data }       session = our own signed token for later requests
+//   GET  (header Authorization: Bearer <session>)        -> { profile, data }
+//   POST { action: "save", data } (same header)          -> { ok, savedAt }
+//
+// Setup (see README): GOOGLE_CLIENT_ID from Google Cloud, and SESSION_SECRET = any long
+// random text. We only ask Google for the player's name, email and picture.
+
+import crypto from "node:crypto";
+import { db } from "./_db.js";
+
+const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+// Google's official endpoint for checking a sign-in token. Can be swapped out for tests.
+const TOKENINFO_URL = process.env.GOOGLE_TOKENINFO_URL || "https://oauth2.googleapis.com/tokeninfo";
+// In test mode (no database) a random secret is fine: sessions just end when the server restarts.
+const SECRET = process.env.SESSION_SECRET || (db.mode === "test" ? crypto.randomBytes(32).toString("hex") : "");
+const SESSION_DAYS = 60;
+const MAX_DATA_BYTES = 300_000;
+
+function makeSession(sub) {
+  const body = Buffer.from(JSON.stringify({ sub, exp: Date.now() + SESSION_DAYS * 86_400_000 })).toString("base64url");
+  const mac = crypto.createHmac("sha256", SECRET).update(body).digest("base64url");
+  return `${body}.${mac}`;
+}
+
+function readSession(req) {
+  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const [body, mac] = token.split(".");
+  if (!body || !mac) return null;
+  const expected = crypto.createHmac("sha256", SECRET).update(body).digest("base64url");
+  if (mac.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString());
+    return payload.exp > Date.now() ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+async function checkGoogleToken(credential) {
+  const res = await fetch(`${TOKENINFO_URL}?id_token=${encodeURIComponent(credential)}`);
+  if (!res.ok) throw new Error("Google didn't accept that sign-in. Try again.");
+  const info = await res.json();
+  const issuers = ["accounts.google.com", "https://accounts.google.com"];
+  if (info.aud !== CLIENT_ID || !issuers.includes(info.iss) || Number(info.exp) * 1000 < Date.now() || !info.sub) {
+    throw new Error("That sign-in wasn't for this site. Try again.");
+  }
+  return {
+    name: String(info.given_name || info.name || "").slice(0, 40),
+    email: String(info.email || "").slice(0, 120),
+    picture: String(info.picture || "").slice(0, 500),
+    sub: String(info.sub),
+  };
+}
+
+const userKey = (sub) => `user:${sub}`;
+async function loadUser(sub) {
+  const [profile, data] = await Promise.all([db.get(`${userKey(sub)}:profile`), db.get(`${userKey(sub)}:data`)]);
+  return {
+    profile: profile ? JSON.parse(profile) : null,
+    data: data ? JSON.parse(data) : null,
+  };
+}
+
+export default async function handler(req, res) {
+  if (!CLIENT_ID) return res.status(503).json({ error: "Google sign-in isn't set up on this site yet." });
+  if (!SECRET) return res.status(500).json({ error: "The server is missing SESSION_SECRET." });
+  try {
+    if (req.method === "GET") {
+      const session = readSession(req);
+      if (!session) return res.status(401).json({ error: "Please sign in again." });
+      return res.status(200).json(await loadUser(session.sub));
+    }
+    if (req.method !== "POST") return res.status(405).json({ error: "Use GET or POST." });
+
+    const body = req.body || {};
+    if (body.action === "signin") {
+      let google;
+      try {
+        google = await checkGoogleToken(String(body.credential || ""));
+      } catch (err) {
+        return res.status(401).json({ error: err.message });
+      }
+      const { sub, ...profile } = google;
+      await db.set(`${userKey(sub)}:profile`, JSON.stringify(profile));
+      const { data } = await loadUser(sub);
+      return res.status(200).json({ session: makeSession(sub), profile, data });
+    }
+
+    if (body.action === "save") {
+      const session = readSession(req);
+      if (!session) return res.status(401).json({ error: "Please sign in again." });
+      if (!body.data || typeof body.data !== "object") return res.status(400).json({ error: "Nothing to save." });
+      const json = JSON.stringify({ ...body.data, savedAt: Date.now() });
+      if (json.length > MAX_DATA_BYTES) return res.status(413).json({ error: "Too much data to save. Delete some old study sets." });
+      await db.set(`${userKey(session.sub)}:data`, json);
+      return res.status(200).json({ ok: true, savedAt: Date.now() });
+    }
+
+    return res.status(400).json({ error: "Unknown action." });
+  } catch (err) {
+    console.error(err);
+    return res.status(502).json({ error: "Couldn't reach your account. Try again in a moment." });
+  }
+}

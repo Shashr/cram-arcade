@@ -1,24 +1,17 @@
 // Local development server: run `npm start`, then open http://localhost:3000
 // (On Vercel this file isn't used; Vercel serves the files and runs the api/ functions itself.)
+import "./load-env.js"; // must come first: reads .env before the api/ files load
 import http from "node:http";
 import { readFile } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import generate from "./api/generate.js";
 import crew from "./api/crew.js";
+import account from "./api/account.js";
+import config from "./api/config.js";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const apis = { "/api/generate": generate, "/api/crew": crew };
-
-// Load ANTHROPIC_API_KEY from a local .env file if there is one.
-const envFile = path.join(root, ".env");
-if (existsSync(envFile)) {
-  for (const line of readFileSync(envFile, "utf8").split("\n")) {
-    const m = line.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/);
-    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
-  }
-}
+const apis = { "/api/generate": generate, "/api/crew": crew, "/api/account": account, "/api/config": config };
 
 const types = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml" };
 
