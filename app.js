@@ -762,7 +762,7 @@ async function accountApi(body) {
     ? await fetch("/api/account", { method: "POST", headers, body: JSON.stringify(body) })
     : await fetch("/api/account", { headers });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && !body?.credential) signOut(true);
+  if (res.status === 401 && !String(body?.action || "").startsWith("signin")) signOut(true);
   if (!res.ok) throw new Error(data.error || "Couldn't reach your account.");
   return data;
 }
@@ -797,11 +797,12 @@ async function pullSync() {
   }
 }
 
-async function signIn(credential) {
+// payload is { action: "signin", credential } (Google) or { action: "signin-microsoft", accessToken }
+async function signIn(payload) {
   const status = $("account-status");
   if (status) { status.className = "status"; status.textContent = "Signing in…"; }
   try {
-    const { session, profile, data } = await accountApi({ action: "signin", credential });
+    const { session, profile, data } = await accountApi(payload);
     safeSet(SESSION_KEY, session);
     safeSet("cram-profile", JSON.stringify(profile));
     account.profile = profile;
@@ -836,9 +837,9 @@ async function renderAccount() {
   const body = $("account-body");
   const config = await getConfig();
   body.innerHTML = "";
-  if (!config.googleClientId) {
-    body.append(el("p", "", "Google sign-in isn't set up on this site yet."));
-    body.append(el("p", "muted small", "If this is your site: add GOOGLE_CLIENT_ID and SESSION_SECRET (see the README, \"Google sign-in and calendar\")."));
+  if (!config.googleClientId && !config.microsoftClientId) {
+    body.append(el("p", "", "Sign-in isn't set up on this site yet."));
+    body.append(el("p", "muted small", "If this is your site: add MICROSOFT_CLIENT_ID and/or GOOGLE_CLIENT_ID, plus SESSION_SECRET (see the README)."));
     return;
   }
   if (account.profile && safeGet(SESSION_KEY)) {
@@ -873,21 +874,156 @@ async function renderAccount() {
   }
   body.append(el("p", "", "Sign in to keep your tickets, study sets and crew on every device. Everything you've done on this device comes with you."));
   if (account.error) body.append(el("p", "status error", account.error));
+  const buttons = el("div", "signin-buttons");
+  body.append(buttons);
+  if (config.microsoftClientId) {
+    const ms = el("button", "ms-btn");
+    ms.type = "button";
+    ms.id = "ms-signin";
+    ms.innerHTML = `<svg viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg><span>Sign in with Microsoft</span>`;
+    ms.addEventListener("click", () => microsoftLogin("signin"));
+    buttons.append(ms);
+  }
   const holder = el("div", "gsi-holder");
   holder.id = "gsi-button";
-  body.append(holder);
+  if (config.googleClientId) buttons.append(holder);
+  if (config.microsoftClientId) body.append(el("p", "muted small", "Use your school Microsoft account if your school uses Outlook and Teams."));
   const status = el("p", "status", "");
   status.id = "account-status";
   status.setAttribute("role", "status");
   body.append(status);
+  if (!config.googleClientId) return;
   try {
     const google = await loadGoogle();
-    google.accounts.id.initialize({ client_id: config.googleClientId, callback: (r) => signIn(r.credential) });
+    google.accounts.id.initialize({ client_id: config.googleClientId, callback: (r) => signIn({ action: "signin", credential: r.credential }) });
     google.accounts.id.renderButton(holder, { theme: "filled_black", size: "large", shape: "pill", text: "signin_with" });
   } catch (err) {
     status.classList.add("error");
     status.textContent = err.message;
   }
+}
+
+/* ---------- Microsoft sign-in, Outlook calendar ----------
+   Uses Microsoft's standard sign-in for web apps (authorization code with PKCE): the page
+   goes to Microsoft's sign-in page and comes back with a one-time code, which this page
+   swaps for a short-lived token. Works for school/work and personal Microsoft accounts. */
+const MS_AUTHORITY = "https://login.microsoftonline.com/common/oauth2/v2.0";
+const MS_SCOPES = {
+  signin: ["openid", "profile", "email", "User.Read"],
+  calendar: ["User.Read", "Calendars.Read"],
+};
+const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const msRedirect = () => `${location.origin}/`;
+
+async function microsoftLogin(intent) {
+  const config = await getConfig();
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+  const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  try { sessionStorage.setItem("cram-ms", JSON.stringify({ verifier, state, intent })); } catch { /* ignore */ }
+  const params = new URLSearchParams({
+    client_id: config.microsoftClientId,
+    response_type: "code",
+    redirect_uri: msRedirect(),
+    response_mode: "query",
+    scope: MS_SCOPES[intent].join(" "),
+    state,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+  });
+  if (intent === "signin") params.set("prompt", "select_account");
+  else if (account.profile?.email) params.set("login_hint", account.profile.email);
+  location.assign(`${MS_AUTHORITY}/authorize?${params}`);
+}
+
+// Turn Microsoft's error into something a student can act on.
+function msErrorMessage(code, description = "") {
+  if (/AADSTS65001|AADSTS90094|admin|consent/i.test(`${code} ${description}`)) {
+    return "Your school needs to approve Cram Arcade before you can sign in with your school account. Ask your teacher to ask IT to approve it, or sign in with a personal account for now.";
+  }
+  if (code === "access_denied") return "Sign-in was cancelled.";
+  return "Microsoft sign-in didn't work. Try again.";
+}
+
+// Runs when Microsoft sends the player back to the page with ?code=... or ?error=...
+async function finishMicrosoftLogin() {
+  const params = new URLSearchParams(location.search);
+  if (!params.has("code") && !params.has("error")) return;
+  let pending = null;
+  try { pending = JSON.parse(sessionStorage.getItem("cram-ms") || "null"); sessionStorage.removeItem("cram-ms"); } catch { /* ignore */ }
+  history.replaceState(null, "", location.pathname); // tidy the address bar
+  if (!pending) return;
+  const showError = (text) => {
+    if (pending.intent === "calendar") {
+      $("cal-pick").hidden = false;
+      $("cal-pick").innerHTML = "";
+      $("cal-pick").append(el("p", "status error", text));
+    } else {
+      account.error = text;
+      openSheet("account");
+    }
+  };
+  if (params.has("error")) return showError(msErrorMessage(params.get("error"), params.get("error_description") || ""));
+  if (params.get("state") !== pending.state) return showError("Sign-in didn't match. Please try again.");
+  let token;
+  try {
+    const config = await getConfig();
+    const res = await fetch(`${MS_AUTHORITY}/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: config.microsoftClientId,
+        grant_type: "authorization_code",
+        code: params.get("code"),
+        redirect_uri: msRedirect(),
+        code_verifier: pending.verifier,
+        scope: MS_SCOPES[pending.intent].join(" "),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.access_token) return showError(msErrorMessage(data.error, data.error_description));
+    token = data.access_token;
+  } catch {
+    return showError("Couldn't reach Microsoft. Check your connection and try again.");
+  }
+  if (pending.intent === "signin") {
+    openSheet("account");
+    await signIn({ action: "signin-microsoft", accessToken: token });
+  } else {
+    const box = $("cal-pick");
+    box.hidden = false;
+    box.innerHTML = '<p class="muted">Looking for tests in your Outlook calendar…</p>';
+    box.scrollIntoView({ behavior: "smooth", block: "center" });
+    try {
+      showCalendarPicker(await readOutlook(token));
+    } catch (err) {
+      box.innerHTML = "";
+      box.append(el("p", "status error", err.message));
+    }
+  }
+}
+
+async function readOutlook(token) {
+  const from = new Date();
+  const to = new Date(Date.now() + 45 * 86_400_000);
+  const url = "https://graph.microsoft.com/v1.0/me/calendarView?" + new URLSearchParams({
+    startDateTime: from.toISOString(), endDateTime: to.toISOString(), $top: "250",
+    $select: "id,subject,start,bodyPreview,isCancelled", $orderby: "start/dateTime",
+  });
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const res = await fetch(url, { headers: { authorization: `Bearer ${token}`, prefer: `outlook.timezone="${zone}"` } });
+  if (!res.ok) throw new Error("Couldn't read your Outlook calendar. Try again.");
+  const { value = [] } = await res.json();
+  return value
+    .filter((ev) => !ev.isCancelled && TEST_WORDS.test(ev.subject || ""))
+    .map((ev) => ({
+      calendarId: `ms:${ev.id}`,
+      name: String(ev.subject).slice(0, 80),
+      date: String(ev.start?.dateTime || "").slice(0, 10),
+      notes: String(ev.bodyPreview || "").slice(0, 600),
+      source: "outlook",
+    }))
+    .filter((t) => /^\d{4}-\d{2}-\d{2}$/.test(t.date) && daysUntil(t.date) >= 0);
 }
 
 /* ---------- Upcoming tests (Google Calendar or added by hand) ---------- */
@@ -973,7 +1109,7 @@ function renderTests() {
     );
     const info = el("div", "test-info");
     info.append(el("h3", "test-name", test.name));
-    info.append(el("p", "muted small", `${prettyDate(test.date)}${test.source === "calendar" ? ", from your calendar" : ""}`));
+    info.append(el("p", "muted small", `${prettyDate(test.date)}${test.source === "calendar" ? ", from Google Calendar" : test.source === "outlook" ? ", from Outlook" : ""}`));
     const linked = sets.find((s) => s.title === test.setTitle);
     const actions = el("div", "test-actions");
     if (linked) {
@@ -1032,7 +1168,7 @@ function renderTests() {
       const doneCount = planned.filter((x) => x.done).length;
       const line = el("p", "small plan-line");
       line.append(`${doneCount} of ${planned.length} study sessions done.${next ? ` Next: ${sessionLabel(next)}.` : ""} `);
-      const ics = el("button", "link-btn", "Add them to my phone's calendar");
+      const ics = el("button", "link-btn", "Add them to Outlook or my phone's calendar");
       ics.type = "button";
       ics.addEventListener("click", () => studyPlanFile(test));
       line.append(ics);
@@ -1517,9 +1653,12 @@ setInterval(checkReminders, 20_000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) checkReminders(); });
 getConfig().then((config) => {
   $("cal-connect").hidden = !config.googleClientId;
-  if (!config.googleClientId) return;
+  $("cal-outlook").hidden = !config.microsoftClientId;
+  finishMicrosoftLogin();
+  if (!config.googleClientId && !config.microsoftClientId) return;
   pullSync().then(() => { renderAccountChip(); });
 });
+$("cal-outlook").addEventListener("click", () => microsoftLogin("calendar"));
 
 /* ---------- Classroom: students join a class, teachers track progress ----------
    A teacher creates a class from their saved sets and shares a 6-character code.
@@ -1832,7 +1971,26 @@ function renderDashboard() {
   codeBox.append(copy);
   hero.append(names, codeBox);
   body.append(hero);
-  body.append(el("p", "muted small", "Students open Classroom, choose \"I'm a student\", and type this code."));
+  const joinLink = `${location.origin}/?class=${d.code}`;
+  const share = el("div", "share-row");
+  const teams = el("a", "btn teams-btn");
+  teams.href = "https://teams.microsoft.com/share?" + new URLSearchParams({
+    href: joinLink,
+    msgText: `Join our Cram Arcade class "${d.className}": open the link, or go to Classroom and type the code ${d.code}.`,
+    preview: "true",
+  });
+  teams.target = "_blank";
+  teams.rel = "noopener";
+  teams.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="1" y="4" width="12" height="12" rx="2" fill="#5059c9"/><path d="M4 7.5h6M7 7.5V13" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><circle cx="15.5" cy="5.5" r="2.5" fill="#7b83eb"/><rect x="13" y="9" width="6" height="7" rx="2" fill="#7b83eb"/></svg><span>Share to Teams</span>`;
+  const copyLink = el("button", "btn small-btn", "Copy join link");
+  copyLink.type = "button";
+  copyLink.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(joinLink); copyLink.textContent = "Link copied"; } catch { copyLink.textContent = joinLink; }
+    setTimeout(() => { copyLink.textContent = "Copy join link"; }, 1800);
+  });
+  share.append(teams, copyLink);
+  body.append(share);
+  body.append(el("p", "muted small", "Students click the link (it fills in the code), or open Classroom, choose \"I'm a student\", and type the code."));
 
   if (d.sets.length > 1) {
     const pickRow = el("div", "dash-set-pick");
@@ -1973,6 +2131,24 @@ async function renderClassroom() {
   if (classUi.role === "teacher") renderTeacher(body);
   else await renderStudent(body);
 }
+
+// A join link like /?class=ABC123 opens Classroom with the code filled in.
+function openJoinLink() {
+  const params = new URLSearchParams(location.search);
+  const code = (params.get("class") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+  if (!code) return;
+  history.replaceState(null, "", location.pathname);
+  classUi.role = "student";
+  classUi.dashboard = null;
+  openSheet("classroom");
+  setTimeout(() => {
+    const input = $("class-code");
+    if (!input) return;
+    input.value = code;
+    ($("class-me").value ? input.closest("form").querySelector("button[type=submit]") : $("class-me")).focus();
+  }, 50);
+}
+openJoinLink();
 
 $("open-class").addEventListener("click", async () => {
   openSheet("classroom");

@@ -1,19 +1,23 @@
-// Sign in with Google, and keep a player's progress in the cloud so it follows them
-// between devices.
+// Sign in with Microsoft or Google, and keep a player's progress in the cloud so it
+// follows them between devices.
 //
 // Requests:
+//   POST { action: "signin-microsoft", accessToken }   from Microsoft's sign-in page (User.Read)
 //   POST { action: "signin", credential }   credential = the ID token from Google's sign-in button
 //        -> { session, profile, data }       session = our own signed token for later requests
 //   GET  (header Authorization: Bearer <session>)        -> { profile, data }
 //   POST { action: "save", data } (same header)          -> { ok, savedAt }
 //
-// Setup (see README): GOOGLE_CLIENT_ID from Google Cloud, and SESSION_SECRET = any long
-// random text. We only ask Google for the player's name, email and picture.
+// Setup (see README): MICROSOFT_CLIENT_ID and/or GOOGLE_CLIENT_ID, and SESSION_SECRET =
+// any long random text. We only use the player's name and email.
 
 import crypto from "node:crypto";
 import { db } from "./_db.js";
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const MS_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID;
+// Microsoft Graph "who am I" endpoint. If Microsoft accepts the token, we know who signed in.
+const GRAPH_ME_URL = process.env.GRAPH_ME_URL || "https://graph.microsoft.com/v1.0/me";
 // Google's official endpoint for checking a sign-in token. Can be swapped out for tests.
 const TOKENINFO_URL = process.env.GOOGLE_TOKENINFO_URL || "https://oauth2.googleapis.com/tokeninfo";
 // In test mode (no database) a random secret is fine: sessions just end when the server restarts.
@@ -57,6 +61,21 @@ async function checkGoogleToken(credential) {
   };
 }
 
+async function checkMicrosoftToken(accessToken) {
+  const res = await fetch(`${GRAPH_ME_URL}?$select=id,displayName,givenName,mail,userPrincipalName`, {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error("Microsoft didn't accept that sign-in. Try again.");
+  const me = await res.json();
+  if (!me.id) throw new Error("Microsoft didn't say who signed in. Try again.");
+  return {
+    name: String(me.givenName || me.displayName || "").slice(0, 40),
+    email: String(me.mail || me.userPrincipalName || "").slice(0, 120),
+    picture: "",
+    sub: `ms:${me.id}`,
+  };
+}
+
 const userKey = (sub) => `user:${sub}`;
 async function loadUser(sub) {
   const [profile, data] = await Promise.all([db.get(`${userKey(sub)}:profile`), db.get(`${userKey(sub)}:data`)]);
@@ -67,7 +86,7 @@ async function loadUser(sub) {
 }
 
 export default async function handler(req, res) {
-  if (!CLIENT_ID) return res.status(503).json({ error: "Google sign-in isn't set up on this site yet." });
+  if (!CLIENT_ID && !MS_CLIENT_ID) return res.status(503).json({ error: "Sign-in isn't set up on this site yet." });
   if (!SECRET) return res.status(500).json({ error: "The server is missing SESSION_SECRET." });
   try {
     if (req.method === "GET") {
@@ -78,14 +97,18 @@ export default async function handler(req, res) {
     if (req.method !== "POST") return res.status(405).json({ error: "Use GET or POST." });
 
     const body = req.body || {};
-    if (body.action === "signin") {
-      let google;
+    if (body.action === "signin" || body.action === "signin-microsoft") {
+      const microsoft = body.action === "signin-microsoft";
+      if (microsoft ? !MS_CLIENT_ID : !CLIENT_ID) return res.status(503).json({ error: "That sign-in isn't set up on this site." });
+      let who;
       try {
-        google = await checkGoogleToken(String(body.credential || ""));
+        who = microsoft
+          ? await checkMicrosoftToken(String(body.accessToken || ""))
+          : await checkGoogleToken(String(body.credential || ""));
       } catch (err) {
         return res.status(401).json({ error: err.message });
       }
-      const { sub, ...profile } = google;
+      const { sub, ...profile } = who;
       await db.set(`${userKey(sub)}:profile`, JSON.stringify(profile));
       const { data } = await loadUser(sub);
       return res.status(200).json({ session: makeSession(sub), profile, data });
