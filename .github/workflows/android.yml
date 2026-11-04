@@ -1,0 +1,82 @@
+# Cram Arcade © 2026 Shashank J Reddy. All rights reserved. See LICENSE.
+# Builds the Android app in the cloud whenever the app changes, then puts the finished
+# file on the website at /downloads/cram-arcade.apk (Vercel publishes it from main).
+name: Build Android app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - index.html
+      - app.js
+      - style.css
+      - manifest.webmanifest
+      - capacitor.config.json
+      - package.json
+      - assets/**
+      - scripts/**
+      - .github/workflows/android.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Create the Android project
+        run: npm run android:setup
+
+      - name: Set the version number
+        run: |
+          sed -i -E "s/versionCode [0-9]+/versionCode ${BUILD_NUMBER}/; s/versionName \"[^\"]*\"/versionName \"1.0.${BUILD_NUMBER}\"/" android/app/build.gradle
+          grep -E "versionCode|versionName" android/app/build.gradle
+
+      - name: Build the signed app
+        run: |
+          export PATH="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1):$PATH"
+          npx cap build android \
+            --keystorepath "$PWD/android-signing/sideload.keystore" \
+            --keystorepass android \
+            --keystorealias cramarcade \
+            --keystorealiaspass android \
+            --androidreleasetype APK
+
+      - name: Put it on the website
+        run: |
+          APK=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          test -n "$APK"
+          mkdir -p downloads
+          cp "$APK" downloads/cram-arcade.apk
+          printf '{"build":%s,"version":"1.0.%s","built":"%s"}\n' "$BUILD_NUMBER" "$BUILD_NUMBER" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > downloads/version.json
+          ls -la downloads
+
+      - name: Save the build
+        run: |
+          git config user.name "Cram Arcade builds"
+          git config user.email "108434740+Shashr@users.noreply.github.com"
+          git add downloads/cram-arcade.apk downloads/version.json
+          git commit -m "Android app build ${BUILD_NUMBER}"
+          git pull --rebase origin main
+          git push origin HEAD:main

@@ -107,7 +107,7 @@ if (NATIVE && PHONE.Haptics) {
   };
 }
 function renderSoundBtn() {
-  $("sound-btn").textContent = fx.on ? "Sound: on" : "Sound: off";
+  $("sound-btn").setAttribute("aria-label", fx.on ? "Sound on" : "Sound off");
   $("sound-btn").setAttribute("aria-pressed", String(fx.on));
 }
 $("sound-btn").addEventListener("click", () => {
@@ -1155,8 +1155,18 @@ function renderTests() {
   const list = $("test-list");
   list.innerHTML = "";
   const tests = upcomingTests();
+  $("test-add-toggle").hidden = !tests.length; // the empty state has its own big button
   if (!tests.length) {
-    list.append(el("p", "tests-empty", "Add your next test and Cram Arcade counts down the days and plans your studying."));
+    const empty = el("div", "tests-empty");
+    empty.append(
+      el("strong", "", "No tests coming up"),
+      el("p", "", "Add your next test. Cram Arcade counts down the days, plans short study sessions and reminds you when it's time."),
+    );
+    const add = el("button", "btn btn-primary", "Add your first test");
+    add.type = "button";
+    add.addEventListener("click", () => { if ($("test-add").hidden) $("test-add-toggle").click(); $("test-name").focus(); });
+    empty.append(add);
+    list.append(empty);
     return;
   }
   const sets = savedSets();
@@ -2674,13 +2684,28 @@ function openSheet(id) {
   if (id === "calendar") renderCalendar();
   if (id === "classroom") renderClassroom();
   if (sheet.showModal) sheet.showModal(); else sheet.setAttribute("open", "");
+  markTab(id);
   fx.play("click");
 }
 $("open-shop").addEventListener("click", () => openSheet("shop"));
 $("open-crew").addEventListener("click", () => openSheet("crew"));
+$("ticket-count").addEventListener("click", () => openSheet("shop"));
+$("nav-calendar").addEventListener("click", () => openSheet("calendar"));
+$("go-home").addEventListener("click", () => { scrollTo({ top: 0, behavior: "smooth" }); fx.play("click"); });
+
+// The tab bar highlights whichever panel is open, and Home otherwise.
+function markTab(sheetId) {
+  const tabs = [...document.querySelectorAll(".tab-btn")];
+  if (sheetId && !tabs.some((b) => b.dataset.sheet === sheetId)) sheetId = null; // not a tab: stay on Home
+  tabs.forEach((b) => {
+    const on = sheetId ? b.dataset.sheet === sheetId : b.id === "go-home";
+    if (on) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+  });
+}
 document.querySelectorAll(".sheet").forEach((sheet) => {
   sheet.querySelector("[data-close]").addEventListener("click", () => sheet.close());
   sheet.addEventListener("click", (e) => { if (e.target === sheet) sheet.close(); }); // click outside to close
+  sheet.addEventListener("close", () => { if (!document.querySelector("dialog[open]")) markTab(null); });
 });
 renderTickets();
 flushScores();
@@ -3349,13 +3374,18 @@ $("make-form").addEventListener("submit", async (e) => {
 if (!NATIVE && "serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
   window.addEventListener("load", () => { navigator.serviceWorker.register("/sw.js").catch(() => {}); });
 }
+// Android phones get the real app (downloaded from this site). Computers can still
+// install the web version when the browser offers it.
 let installPrompt = null;
+let apkReady = false;
+const ON_ANDROID = /Android/i.test(navigator.userAgent);
 window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   installPrompt = e;
-  $("install-btn").hidden = false;
+  if (!apkReady) { $("install-btn").textContent = "Install app"; $("install-btn").hidden = false; }
 });
 $("install-btn").addEventListener("click", async () => {
+  if (apkReady && ON_ANDROID) { openSheet("getapp"); return; }
   if (!installPrompt) return;
   installPrompt.prompt();
   await installPrompt.userChoice.catch(() => null);
@@ -3363,6 +3393,56 @@ $("install-btn").addEventListener("click", async () => {
   $("install-btn").hidden = true;
 });
 window.addEventListener("appinstalled", () => { $("install-btn").hidden = true; });
+
+async function apkInfo(base = "") {
+  try {
+    const res = await fetch(`${base}/downloads/version.json`, { cache: "no-store" });
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+if (!NATIVE) {
+  apkInfo().then((info) => {
+    if (!info?.build) return;
+    apkReady = true;
+    $("getapp-version").textContent = `Version ${info.version}`;
+    $("footer-app").hidden = false;
+    if (!ON_ANDROID || safeGet("cram-hide-promo") === "yes") return;
+    // On Android phones, a card at the top of Home (the top bar has no room for it).
+    const card = el("div", "reminder reminder-update app-promo");
+    const text = el("p", "reminder-text");
+    text.append(el("strong", "", "Get the Cram Arcade app."), " Reminders before your tests, even when the app is closed.");
+    const go = el("button", "btn btn-primary", "Get the app");
+    go.type = "button";
+    go.addEventListener("click", () => openSheet("getapp"));
+    const actions = el("div", "reminder-actions");
+    actions.append(go);
+    const hide = el("button", "reminder-hide", "×");
+    hide.type = "button";
+    hide.setAttribute("aria-label", "Hide this");
+    hide.addEventListener("click", () => { safeSet("cram-hide-promo", "yes"); card.remove(); });
+    card.append(text, actions, hide);
+    $("reminders").before(card);
+  });
+  $("footer-app").addEventListener("click", (e) => { e.preventDefault(); openSheet("getapp"); });
+} else {
+  // Downloaded apps don't update themselves, so say when a newer one is on the website.
+  Promise.all([fetch("version.json").then((r) => r.json()).catch(() => null), apkInfo(API)]).then(([mine, latest]) => {
+    if (!mine?.build || !latest?.build || latest.build <= mine.build) return;
+    const card = el("div", "reminder reminder-update");
+    const text = el("p", "reminder-text");
+    text.append(el("strong", "", "A new version of Cram Arcade is ready."), " Your tickets and sets stay put.");
+    const go = el("button", "btn btn-primary", "Update");
+    go.type = "button";
+    go.addEventListener("click", () => { location.href = `${API}/downloads/cram-arcade.apk`; });
+    const actions = el("div", "reminder-actions");
+    actions.append(go);
+    card.append(text, actions);
+    $("reminders").before(card);
+  });
+}
 
 loadSet(EXAMPLE_SET, "example");
 renderSaved();

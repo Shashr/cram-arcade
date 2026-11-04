@@ -153,7 +153,13 @@ On top of the website, the app adds:
 
 Signing in inside the app is coming next (Google blocks its web sign-in inside apps).
 
-**First-time setup** (needs [Node.js](https://nodejs.org) 22+ and
+**How people get it:** every time the app's code changes on `main`, GitHub builds the
+Android app in the cloud (`.github/workflows/android.yml`) and saves it to
+`downloads/cram-arcade.apk`, which Vercel puts on the website. Android visitors see a
+**Get the app** card, and installed apps show an **Update** button when a newer build is
+out. No Android Studio needed. The signing key is in `android-signing/`.
+
+**Building it yourself instead** (optional; needs [Node.js](https://nodejs.org) 22+ and
 [Android Studio](https://developer.android.com/studio)):
 
 ```

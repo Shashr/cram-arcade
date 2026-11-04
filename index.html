@@ -15,24 +15,42 @@
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 </head>
-<body>
-  <header class="top wrap">
-    <div class="marquee" aria-label="Cram Arcade">
-      <span class="bulbs" aria-hidden="true"></span>
-      <h1 class="logo"><span class="logo-cram">Cram</span><span class="logo-arcade">Arcade</span></h1>
-    </div>
-    <p class="tagline">Turn your notes into games.</p>
-    <button id="sound-btn" class="chip-btn sound-btn" type="button" aria-pressed="true">Sound: on</button>
-    <div class="player-bar">
-      <span class="ticket-count" id="ticket-count">
-        <svg class="ticket-icon" viewBox="0 0 32 20" aria-hidden="true"><path d="M2 3h28v4a3 3 0 0 0 0 6v4H2v-4a3 3 0 0 0 0-6z"/><path class="ticket-dash" d="M21 4v12"/></svg>
-        <strong id="ticket-num">0</strong> tickets
-      </span>
-      <button id="open-shop" class="chip-btn" type="button">Prize counter</button>
-      <button id="open-crew" class="chip-btn" type="button">Crew leaderboard</button>
-      <button id="open-class" class="chip-btn" type="button">Classroom</button>
-      <button id="install-btn" class="chip-btn install-chip" type="button" hidden>Install app</button>
-      <button id="open-account" class="chip-btn account-chip" type="button">Sign in</button>
+<body id="top">
+  <header class="appbar">
+    <div class="appbar-inner">
+      <a class="brand" href="#top" aria-label="Cram Arcade, back to top">
+        <span class="bulbs" aria-hidden="true"></span>
+        <span class="brand-word" aria-hidden="true"><span class="logo-cram">Cram</span><span class="logo-arcade">Arcade</span></span>
+      </a>
+      <nav class="tabbar" aria-label="Main">
+        <button class="tab-btn" id="go-home" type="button" aria-current="page">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg><span>Home</span>
+        </button>
+        <button class="tab-btn" id="nav-calendar" type="button" data-sheet="calendar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span>Calendar</span>
+        </button>
+        <button class="tab-btn" id="open-shop" type="button" data-sheet="shop">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18v4H3zM5 11h14v10H5zM12 7v14M12 7c-2-4-6-4-6-1.5S9 7 12 7c3 0 6-.5 6-1.5S14 3 12 7z"/></svg><span>Prizes</span>
+        </button>
+        <button class="tab-btn" id="open-crew" type="button" data-sheet="crew">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.5-4 3-6 6.5-6s6 2 6.5 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14c3 0 5 1.6 5.5 5"/></svg><span>Crew</span>
+        </button>
+        <button class="tab-btn" id="open-class" type="button" data-sheet="classroom">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c0 1.5 3 3 6 3s6-1.5 6-3v-5M22 9v6"/></svg><span>Class</span>
+        </button>
+      </nav>
+      <div class="appbar-right">
+        <button id="install-btn" class="chip-btn install-chip" type="button" hidden>Get the app</button>
+        <button class="ticket-count" id="ticket-count" type="button" aria-label="Your tickets. Open the prize counter">
+          <svg class="ticket-icon" viewBox="0 0 32 20" aria-hidden="true"><path d="M2 3h28v4a3 3 0 0 0 0 6v4H2v-4a3 3 0 0 0 0-6z"/><path class="ticket-dash" d="M21 4v12"/></svg>
+          <strong id="ticket-num">0</strong><span class="ticket-word">tickets</span>
+        </button>
+        <button id="sound-btn" class="icon-btn sound-btn" type="button" aria-pressed="true" aria-label="Sound on">
+          <svg class="snd-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>
+          <svg class="snd-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>
+        </button>
+        <button id="open-account" class="chip-btn account-chip" type="button">Sign in</button>
+      </div>
     </div>
   </header>
 
@@ -75,6 +93,23 @@
     <div id="account-body"></div>
   </dialog>
 
+  <dialog id="getapp" class="sheet" aria-labelledby="getapp-title">
+    <div class="sheet-head">
+      <h2 id="getapp-title">Get the Android app</h2>
+      <button class="sheet-close" type="button" data-close aria-label="Close">×</button>
+    </div>
+    <p>The app sends real reminders before your tests, even when it's closed, and buzzes when you hit the boss.</p>
+    <a class="btn btn-primary getapp-download" href="/downloads/cram-arcade.apk" download>Download Cram Arcade</a>
+    <p class="muted small" id="getapp-version"></p>
+    <h3 class="sheet-sub">Installing it</h3>
+    <ol class="getapp-steps">
+      <li>Tap <strong>Download Cram Arcade</strong>, then open the file when it finishes.</li>
+      <li>If your phone asks, allow your browser to install apps (Settings → <strong>Allow from this source</strong>), then go back.</li>
+      <li>Tap <strong>Install</strong>. Cram Arcade shows up with your other apps.</li>
+    </ol>
+    <p class="muted small">Your phone may warn that the app isn't from Google Play yet. That's expected while it's in early access.</p>
+  </dialog>
+
   <div class="ticket-toast" id="ticket-toast" role="status" aria-live="polite"></div>
 
   <dialog id="shop" class="sheet" aria-labelledby="shop-title">
@@ -100,9 +135,36 @@
   </dialog>
 
   <main class="wrap">
+    <p class="hello">Turn your notes into games.</p>
     <div id="reminders" class="reminders" aria-live="polite"></div>
 
-    <section class="panel maker-wrap" aria-label="Make a study set">
+    <section id="tests" class="tests" aria-labelledby="tests-title">
+      <div class="tests-head">
+        <h2 class="section-title" id="tests-title">Upcoming tests</h2>
+        <button id="test-add-toggle" class="btn btn-primary btn-small" type="button" aria-expanded="false">+ Add a test</button>
+      </div>
+      <div class="tests-actions">
+        <button id="open-calendar" class="chip-btn" type="button">Open calendar</button>
+        <button id="cal-outlook" class="chip-btn" type="button" hidden>Find tests in Outlook</button>
+        <button id="cal-connect" class="chip-btn" type="button" hidden>Find tests in Google Calendar</button>
+      </div>
+      <form id="test-add" class="panel test-add" hidden>
+        <label class="label" for="test-name">Test name</label>
+        <input id="test-name" class="text-input" maxlength="80" placeholder="Bio unit 4 test" autocomplete="off">
+        <label class="label" for="test-date">Date</label>
+        <input id="test-date" class="text-input" type="date">
+        <div class="maker-row">
+          <p id="test-add-status" class="status" role="status"></p>
+          <button class="btn btn-primary" type="submit">Add test</button>
+        </div>
+      </form>
+      <div id="cal-pick" class="panel cal-pick" hidden></div>
+      <div id="test-list" class="test-list"></div>
+    </section>
+
+    <section class="maker-section" aria-labelledby="maker-title">
+      <h2 class="section-title" id="maker-title">Make a study set</h2>
+    <section class="panel maker-wrap">
       <div class="switch mode-switch" role="tablist" aria-label="How to make a set">
         <button role="tab" class="tab" aria-selected="true" data-mode="ai" type="button">Make it with AI</button>
         <button role="tab" class="tab" aria-selected="false" data-mode="own" type="button">Type my own</button>
@@ -142,29 +204,6 @@
         <p id="own-status" class="status" role="status"></p>
       </form>
     </section>
-
-    <section id="tests" class="tests" aria-labelledby="tests-title">
-      <div class="tests-head">
-        <h2 class="shelf-title" id="tests-title">Upcoming tests</h2>
-        <div class="tests-actions">
-          <button id="open-calendar" class="chip-btn" type="button">Calendar</button>
-          <button id="cal-outlook" class="chip-btn" type="button" hidden>Find tests in Outlook</button>
-          <button id="cal-connect" class="chip-btn" type="button" hidden>Find tests in Google Calendar</button>
-          <button id="test-add-toggle" class="chip-btn" type="button" aria-expanded="false">Add a test</button>
-        </div>
-      </div>
-      <form id="test-add" class="panel test-add" hidden>
-        <label class="label" for="test-name">Test name</label>
-        <input id="test-name" class="text-input" maxlength="80" placeholder="Bio unit 4 test" autocomplete="off">
-        <label class="label" for="test-date">Date</label>
-        <input id="test-date" class="text-input" type="date">
-        <div class="maker-row">
-          <p id="test-add-status" class="status" role="status"></p>
-          <button class="btn btn-primary" type="submit">Add test</button>
-        </div>
-      </form>
-      <div id="cal-pick" class="panel cal-pick" hidden></div>
-      <div id="test-list" class="test-list"></div>
     </section>
 
     <section id="saved" class="saved" hidden aria-labelledby="saved-title">
@@ -268,7 +307,7 @@
 
   <footer class="wrap foot">
     <p>AI-made study sets can contain mistakes, so double-check anything important.</p>
-    <p>© 2026 Shashank J Reddy. All rights reserved. <a href="terms.html">Terms of Use</a> <a href="privacy.html">Privacy Policy</a></p>
+    <p>© 2026 Shashank J Reddy. All rights reserved. <a href="terms.html">Terms of Use</a> <a href="privacy.html">Privacy Policy</a> <a href="#" id="footer-app" hidden>Android app</a></p>
   </footer>
 
   <script src="app.js"></script>
