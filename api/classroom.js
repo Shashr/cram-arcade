@@ -16,6 +16,7 @@
 
 import crypto from "node:crypto";
 import { db } from "./_db.js";
+import { cors } from "./_cors.js";
 
 const KEEP_SECONDS = 60 * 60 * 24 * 365;
 const MAX_STUDENTS = 200;
@@ -136,6 +137,7 @@ function updateProgress(record, body) {
 }
 
 export default async function handler(req, res) {
+  if (cors(req, res)) return;
   try {
     if (req.method === "GET") {
       const code = cleanCode(req.query?.code);

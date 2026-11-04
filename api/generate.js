@@ -1,6 +1,7 @@
 // Cram Arcade © 2026 Shashank J Reddy. All rights reserved. See LICENSE.
 // Serverless function: turns notes or a topic into a study set using Claude.
 // Runs on the server, so the API key is never sent to the browser.
+import { cors } from "./_cors.js";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-haiku-5-5";
 const MAX_INPUT = 8000; // characters of notes we accept
@@ -56,6 +57,7 @@ export function parseStudySet(raw) {
 }
 
 export default async function handler(req, res) {
+  if (cors(req, res)) return;
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Use POST." });
   }

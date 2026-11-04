@@ -1,0 +1,15 @@
+{
+  "appId": "app.cramarcade.android",
+  "appName": "Cram Arcade",
+  "webDir": "www",
+  "backgroundColor": "#2a1a63",
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_cram",
+      "iconColor": "#ffc93c"
+    }
+  }
+}
