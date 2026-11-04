@@ -323,6 +323,351 @@ $("own-form").addEventListener("submit", (e) => {
   document.querySelector(".set").scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
+/* ---------- Player: tickets, prizes, crew ----------
+   Win tickets in games, spend them at the prize counter, and compete with friends
+   on a crew leaderboard. Everything about you is kept in this browser; only your
+   nickname, nameplate and tickets earned are sent to your crew's leaderboard. */
+const PLAYER_KEY = "cram-player";
+const POWERUPS = [
+  { id: "heart", name: "Extra heart", price: 60, desc: "Get one heart back during a boss fight (once per fight)." },
+  { id: "freeze", name: "Time freeze", price: 40, desc: "Stop the timer on one question." },
+  { id: "fifty", name: "50/50", price: 30, desc: "Remove two wrong answers." },
+];
+const PLATES = [
+  { id: "classic", name: "Classic", price: 0 },
+  { id: "gold", name: "Gold", price: 150 },
+  { id: "neon", name: "Neon", price: 250 },
+  { id: "flame", name: "Flame", price: 400 },
+  { id: "galaxy", name: "Galaxy", price: 600 },
+];
+
+function newPlayerId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return "p-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+function loadPlayer() {
+  let saved = {};
+  try { saved = JSON.parse(safeGet(PLAYER_KEY) || "{}"); } catch { /* start fresh */ }
+  return {
+    id: newPlayerId(), name: "", tickets: 0, earned: 0,
+    inventory: { heart: 0, freeze: 0, fifty: 0 }, plates: ["classic"], plate: "classic",
+    crew: null, pending: 0, pendingWins: 0,
+    ...saved,
+  };
+}
+const player = loadPlayer();
+function savePlayer() { safeSet(PLAYER_KEY, JSON.stringify(player)); }
+savePlayer();
+
+function renderTickets() {
+  $("ticket-num").textContent = player.tickets;
+  $("shop-tickets").textContent = player.tickets;
+}
+
+// Repeat plays of the same set on the same day earn fewer tickets (100%, 50%, then 25%),
+// so the leaderboard rewards studying, not replaying the easiest set forever.
+function repeatFactor(game) {
+  const today = new Date().toDateString();
+  let log = {};
+  try { log = JSON.parse(safeGet("cram-plays") || "{}"); } catch { /* ignore */ }
+  if (log.day !== today) log = { day: today, plays: {} };
+  const key = `${game}:${state.set.title}`;
+  const count = log.plays[key] || 0;
+  log.plays[key] = count + 1;
+  safeSet("cram-plays", JSON.stringify(log));
+  return [1, 0.5, 0.25][Math.min(count, 2)];
+}
+
+let toastTimer = 0;
+function ticketToast(amount, reason) {
+  const toast = $("ticket-toast");
+  toast.textContent = `+${amount} tickets ${reason}`;
+  toast.classList.remove("show");
+  void toast.offsetWidth;
+  toast.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove("show"), 2600);
+  replay($("ticket-count"), "bump", 300);
+}
+
+// Give the player tickets. Returns how many they actually got after repeat-play scaling.
+function award(base, reason, game, { win = false } = {}) {
+  const amount = Math.round(base * repeatFactor(game));
+  if (amount <= 0) return 0;
+  player.tickets += amount;
+  player.earned += amount;
+  if (player.crew) {
+    player.pending += amount;
+    if (win) player.pendingWins += 1;
+  }
+  savePlayer();
+  renderTickets();
+  setTimeout(() => { ticketToast(amount, reason); fx.play("pair"); }, 400);
+  flushScores();
+  return amount;
+}
+
+/* ----- Talking to the crew leaderboard ----- */
+async function crewApi(body) {
+  const res = body ? await fetch("/api/crew", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  }) : await fetch(`/api/crew?code=${encodeURIComponent(player.crew.code)}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Couldn't reach the leaderboard. Check your connection.");
+  return data;
+}
+
+let flushing = false;
+let crewBoard = null;
+async function flushScores() {
+  if (flushing || !player.crew || (player.pending <= 0 && player.pendingWins <= 0)) return;
+  flushing = true;
+  try {
+    while (player.pending > 0 || player.pendingWins > 0) {
+      const tickets = Math.min(400, player.pending);
+      const win = player.pendingWins > 0;
+      crewBoard = await crewApi({ action: "score", code: player.crew.code, playerId: player.id, tickets, win });
+      player.pending -= tickets;
+      if (win) player.pendingWins -= 1;
+      savePlayer();
+    }
+    if ($("crew").open) renderCrew();
+  } catch { /* keep them pending and try again later */ }
+  flushing = false;
+}
+
+/* ----- Prize counter ----- */
+function shopCard(title, desc, footer) {
+  const card = el("div", "shop-item");
+  card.append(title);
+  if (desc) card.append(el("p", "muted small", desc));
+  card.append(footer);
+  return card;
+}
+function plateTag(name, plate) {
+  return el("span", `plate plate-${plate}`, name || "Your name");
+}
+function renderShop() {
+  renderTickets();
+  const ups = $("shop-powerups");
+  ups.innerHTML = "";
+  for (const item of POWERUPS) {
+    const title = el("div", "shop-title");
+    title.append(el("strong", "", item.name), el("span", "owned", `You have ${player.inventory[item.id] || 0}`));
+    const buy = el("button", "btn btn-buy", `Buy for ${item.price}`);
+    buy.type = "button";
+    if (player.tickets < item.price) {
+      buy.disabled = true;
+      buy.textContent = `Need ${item.price - player.tickets} more`;
+    }
+    buy.addEventListener("click", () => {
+      if (player.tickets < item.price) return;
+      player.tickets -= item.price;
+      player.inventory[item.id] = (player.inventory[item.id] || 0) + 1;
+      savePlayer();
+      fx.play("good");
+      renderShop();
+    });
+    ups.append(shopCard(title, item.desc, buy));
+  }
+
+  const plates = $("shop-plates");
+  plates.innerHTML = "";
+  for (const item of PLATES) {
+    const owned = player.plates.includes(item.id);
+    const equipped = player.plate === item.id;
+    const title = el("div", "shop-title");
+    title.append(plateTag(player.name || item.name, item.id));
+    const btn = el("button", "btn btn-buy");
+    btn.type = "button";
+    if (equipped) { btn.textContent = "Wearing it"; btn.disabled = true; btn.classList.add("btn-done"); }
+    else if (owned) btn.textContent = "Wear it";
+    else if (player.tickets < item.price) { btn.textContent = `${item.name}: need ${item.price - player.tickets} more`; btn.disabled = true; }
+    else btn.textContent = `Buy ${item.name} for ${item.price}`;
+    btn.addEventListener("click", async () => {
+      if (!owned) {
+        if (player.tickets < item.price) return;
+        player.tickets -= item.price;
+        player.plates.push(item.id);
+        confetti(50);
+        fx.play("win");
+      } else fx.play("click");
+      player.plate = item.id;
+      savePlayer();
+      renderShop();
+      if (player.crew) crewApi({ action: "profile", code: player.crew.code, playerId: player.id, name: player.name, plate: player.plate })
+        .then((b) => { crewBoard = b; }).catch(() => {});
+    });
+    plates.append(shopCard(title, "", btn));
+  }
+}
+
+/* ----- Crew leaderboard ----- */
+let crewTab = "week";
+function crewForm() {
+  const wrap = el("div", "crew-start");
+  wrap.innerHTML = `
+    <p>Start a crew and share its code with friends. Everyone's tickets go on one leaderboard, and it resets every Monday.</p>
+    <label class="label" for="crew-name-me">Your nickname</label>
+    <input id="crew-name-me" class="text-input" maxlength="20" autocomplete="nickname" placeholder="What your friends call you">
+    <div class="crew-choices">
+      <form class="crew-choice" id="crew-create">
+        <h3 class="sheet-sub">Start a crew</h3>
+        <input class="text-input" id="crew-new-name" maxlength="20" placeholder="Crew name, like Chem gang" aria-label="Crew name">
+        <button class="btn btn-primary" type="submit">Start a crew</button>
+      </form>
+      <form class="crew-choice" id="crew-join">
+        <h3 class="sheet-sub">Join a crew</h3>
+        <input class="text-input code-input" id="crew-code" maxlength="5" placeholder="5-letter code" aria-label="Crew code" autocomplete="off">
+        <button class="btn" type="submit">Join</button>
+      </form>
+    </div>
+    <p class="status" id="crew-status" role="status"></p>`;
+  const nameIn = wrap.querySelector("#crew-name-me");
+  nameIn.value = player.name;
+  const go = async (e, body) => {
+    e.preventDefault();
+    const status = wrap.querySelector("#crew-status");
+    status.className = "status";
+    const name = nameIn.value.trim();
+    if (!name) { status.classList.add("error"); status.textContent = "Type a nickname first."; nameIn.focus(); return; }
+    player.name = name;
+    savePlayer();
+    status.textContent = "Connecting…";
+    try {
+      crewBoard = await crewApi({ ...body, playerId: player.id, name, plate: player.plate });
+      player.crew = { code: crewBoard.code, name: crewBoard.crewName };
+      savePlayer();
+      fx.play("win");
+      renderCrew();
+    } catch (err) {
+      status.classList.add("error");
+      status.textContent = err.message;
+      fx.play("bad");
+    }
+  };
+  wrap.querySelector("#crew-create").addEventListener("submit", (e) =>
+    go(e, { action: "create", crewName: wrap.querySelector("#crew-new-name").value }));
+  wrap.querySelector("#crew-join").addEventListener("submit", (e) =>
+    go(e, { action: "join", code: wrap.querySelector("#crew-code").value }));
+  return wrap;
+}
+
+function chaseLine(players, me, key) {
+  const myIndex = players.findIndex((p) => p.id === player.id);
+  if (myIndex < 0 || players.length < 2) return "Share your crew code so friends can join.";
+  if (myIndex === 0) {
+    const gap = me[key] - players[1][key];
+    return gap === 0 ? `You're tied with ${players[1].name} for first. Win one more fight to pull ahead.`
+      : `You're in first place, ${gap} tickets ahead of ${players[1].name}.`;
+  }
+  const above = players[myIndex - 1];
+  return `You're ${above[key] - me[key] + 1} tickets away from passing ${above.name}. A boss win could do it.`;
+}
+
+function renderCrewBoard(body) {
+  const b = crewBoard;
+  const head = el("div", "crew-head");
+  const title = el("div");
+  title.append(el("p", "crew-name", b.crewName));
+  const codeRow = el("p", "muted small");
+  codeRow.append("Crew code ", el("strong", "crew-code", b.code));
+  title.append(codeRow);
+  const copy = el("button", "btn", "Copy code");
+  copy.type = "button";
+  copy.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(b.code); copy.textContent = "Copied"; } catch { copy.textContent = b.code; }
+    setTimeout(() => { copy.textContent = "Copy code"; }, 1500);
+  });
+  head.append(title, copy);
+  body.append(head);
+
+  const tabs = el("div", "switch");
+  tabs.setAttribute("role", "tablist");
+  for (const [id, label] of [["week", "This week"], ["total", "All time"]]) {
+    const t = el("button", "tab", label);
+    t.type = "button";
+    t.setAttribute("role", "tab");
+    t.setAttribute("aria-selected", String(crewTab === id));
+    t.addEventListener("click", () => { crewTab = id; renderCrew(); });
+    tabs.append(t);
+  }
+  body.append(tabs);
+
+  const players = [...b.players].sort((x, y) => y[crewTab] - x[crewTab] || y.wins - x.wins);
+  const me = players.find((p) => p.id === player.id);
+  const list = el("ol", "board");
+  players.forEach((p, i) => {
+    const row = el("li", p.id === player.id ? "board-row me" : "board-row");
+    row.append(el("span", `board-rank rank-${i + 1}`, String(i + 1)));
+    const who = el("span", "board-who");
+    who.append(plateTag(p.name, p.plate), el("span", "muted small", `${p.wins} boss win${p.wins === 1 ? "" : "s"}`));
+    row.append(who, el("span", "board-score", String(p[crewTab])));
+    list.append(row);
+  });
+  body.append(list);
+  if (me) body.append(el("p", "chase", chaseLine(players, me, crewTab)));
+  if (b.mode === "test") {
+    body.append(el("p", "muted small test-note",
+      "Test mode: this leaderboard only lives on this computer until the server restarts. Connect a database when you put the site online so friends can join (see the README)."));
+  }
+
+  const actions = el("div", "maker-row");
+  const refresh = el("button", "btn", "Refresh");
+  refresh.type = "button";
+  refresh.addEventListener("click", () => renderCrew(true));
+  const leave = el("button", "btn btn-quiet", "Leave crew");
+  leave.type = "button";
+  leave.addEventListener("click", () => {
+    player.crew = null;
+    player.pending = 0;
+    player.pendingWins = 0;
+    crewBoard = null;
+    savePlayer();
+    renderCrew();
+  });
+  actions.append(refresh, leave);
+  body.append(actions);
+}
+
+async function renderCrew(reload = false) {
+  const body = $("crew-body");
+  if (!player.crew) { body.innerHTML = ""; body.append(crewForm()); return; }
+  if (!crewBoard || reload || crewBoard.code !== player.crew.code) {
+    body.innerHTML = '<p class="muted">Loading the leaderboard…</p>';
+    try {
+      await flushScores();
+      crewBoard = await crewApi();
+    } catch (err) {
+      body.innerHTML = "";
+      body.append(el("p", "status error", err.message));
+      const leave = el("button", "btn btn-quiet", "Leave this crew");
+      leave.type = "button";
+      leave.addEventListener("click", () => { player.crew = null; savePlayer(); renderCrew(); });
+      body.append(leave);
+      return;
+    }
+  }
+  body.innerHTML = "";
+  renderCrewBoard(body);
+}
+
+function openSheet(id) {
+  const sheet = $(id);
+  if (id === "shop") renderShop();
+  if (id === "crew") renderCrew(true);
+  if (sheet.showModal) sheet.showModal(); else sheet.setAttribute("open", "");
+  fx.play("click");
+}
+$("open-shop").addEventListener("click", () => openSheet("shop"));
+$("open-crew").addEventListener("click", () => openSheet("crew"));
+document.querySelectorAll(".sheet").forEach((sheet) => {
+  sheet.querySelector("[data-close]").addEventListener("click", () => sheet.close());
+  sheet.addEventListener("click", (e) => { if (e.target === sheet) sheet.close(); }); // click outside to close
+});
+renderTickets();
+flushScores();
+
 /* ---------- Loading a set ---------- */
 const KIND_LABELS = { example: "Example set", ai: "Your AI study set", own: "Your own set" };
 function loadSet(set, kind) {
@@ -331,6 +676,7 @@ function loadSet(set, kind) {
   state.index = 0;
   state.known.clear();
   state.learning.clear();
+  state.deckAwarded = false;
   $("set-title").textContent = set.title;
   $("set-kind").textContent = KIND_LABELS[kind] || "Study set";
   renderCard();
@@ -376,9 +722,11 @@ function markCard(known) {
   fx.play(known ? "good" : "click");
   replay($(known ? "known-btn" : "learning-btn"), "pulse", 400);
   replay($("tally"), "bump", 300);
-  if (known && state.known.size === state.order.length) {
+  if (known && state.known.size === state.order.length && !state.deckAwarded) {
+    state.deckAwarded = true;
     confetti();
     fx.play("win");
+    award(20, "for knowing every card", "cards");
   }
   moveCard(1);
 }
@@ -475,6 +823,7 @@ function renderQuizResult() {
   countUp(card.querySelector(".score-big span"), quiz.score);
   if (pct === 100) { confetti(); fx.play("win"); }
   else fx.play(pct >= 70 ? "pair" : "lose");
+  award(quiz.score * 5 + (pct === 100 ? 20 : 0), pct === 100 ? "for a perfect quiz" : "for your quiz answers", "quiz");
   const again = document.createElement("button");
   again.type = "button";
   again.className = "btn btn-primary";
@@ -563,6 +912,7 @@ function finishMatch() {
   done.hidden = false;
   replay(done, "pop", 500);
   if (isRecord) { confetti(); fx.play("win"); } else fx.play("good");
+  award(15 + (isRecord ? 25 : 0), isRecord ? "for a new match record" : "for finishing the match", "match");
 }
 $("match-restart").addEventListener("click", newMatchRound);
 
@@ -646,8 +996,9 @@ function startBoss() {
   }
   const max = Math.min(pool.length, BOSS.maxQuestionsForHp) * BOSS.hpPerQuestion;
   Object.assign(boss, {
-    active: true, pool, qi: 0, max, hp: max, hearts: BOSS.hearts, combo: 0, maxCombo: 0,
+    active: true, pool, qi: 0, max, hp: max, hearts: BOSS.hearts, maxHearts: BOSS.hearts, combo: 0, maxCombo: 0,
     right: 0, answered: 0, missed: new Map(), start: Date.now(), locked: false, enraged: false,
+    heartUsed: false, frozen: false, fiftyUsed: false,
   });
   body.innerHTML = `
     <div class="arena" id="arena">
@@ -665,6 +1016,7 @@ function startBoss() {
         <span class="combo mono" id="combo"></span>
       </div>
       <div class="timer" id="timer"><span id="timer-fill"></span></div>
+      <div class="powers" id="boss-powers"></div>
       <p class="eyebrow" id="boss-kind"></p>
       <p class="quiz-q" id="boss-q"></p>
       <div class="options" id="boss-options"></div>
@@ -684,12 +1036,10 @@ function updateBossHud() {
   $("boss-hp-text").textContent = `${boss.hp} / ${boss.max}`;
   $("boss-hp").parentElement.setAttribute("aria-valuenow", boss.hp);
   const hearts = $("hearts");
-  if (hearts.children.length !== BOSS.hearts) {
-    hearts.innerHTML = "";
-    for (let i = 0; i < BOSS.hearts; i++) hearts.append(el("span", "heart", "♥"));
-  }
+  while (hearts.children.length < boss.maxHearts) hearts.append(el("span", "heart", "♥"));
   [...hearts.children].forEach((h, i) => {
     const alive = i < boss.hearts;
+    if (alive && h.classList.contains("lost")) { h.classList.remove("lost"); h.textContent = "♥"; replay(h, "pop", 500); }
     if (!alive && !h.classList.contains("lost")) { h.classList.add("lost"); h.textContent = "♡"; }
   });
   hearts.setAttribute("aria-label", `${boss.hearts} hearts left`);
@@ -705,6 +1055,9 @@ function nextBossQuestion() {
   const q = boss.pool[boss.qi++];
   boss.q = q;
   boss.locked = false;
+  boss.frozen = false;
+  boss.fiftyUsed = false;
+  $("timer").classList.remove("frozen");
   $("boss-kind").textContent = q.kind === "card" ? "Which answer matches this?" : "Question";
   $("boss-q").textContent = q.prompt;
   $("boss-log").textContent = "";
@@ -733,6 +1086,56 @@ function nextBossQuestion() {
   };
   cancelAnimationFrame(boss.raf);
   boss.raf = requestAnimationFrame(tick);
+  renderPowers();
+}
+
+/* Power-ups bought at the prize counter */
+function timeLeft() {
+  return boss.frozen ? boss.frozenLeft : Math.max(0, 1 - (performance.now() - boss.qStart) / boss.limit);
+}
+function renderPowers() {
+  const box = $("boss-powers");
+  if (!box) return;
+  box.innerHTML = "";
+  const inv = player.inventory;
+  if (!inv.heart && !inv.freeze && !inv.fifty) return; // nothing to show until you buy some
+  const ready = { heart: !boss.heartUsed, freeze: !boss.frozen, fifty: !boss.fiftyUsed };
+  for (const item of POWERUPS) {
+    const b = el("button", `power power-${item.id}`);
+    b.type = "button";
+    b.append(el("span", "", item.name), el("span", "power-count", String(inv[item.id] || 0)));
+    b.disabled = !inv[item.id] || !ready[item.id] || boss.locked || !boss.active;
+    b.addEventListener("click", () => usePower(item.id));
+    box.append(b);
+  }
+}
+function usePower(id) {
+  if (!boss.active || boss.locked || !player.inventory[id]) return;
+  if (id === "heart") {
+    if (boss.heartUsed) return;
+    boss.heartUsed = true;
+    boss.hearts++;
+    boss.maxHearts = Math.max(boss.maxHearts, boss.hearts);
+    fx.play("good");
+  } else if (id === "freeze") {
+    if (boss.frozen) return;
+    boss.frozenLeft = timeLeft();
+    boss.frozen = true;
+    cancelAnimationFrame(boss.raf);
+    $("timer").classList.add("frozen");
+    fx.play("flip");
+  } else if (id === "fifty") {
+    if (boss.fiftyUsed) return;
+    boss.fiftyUsed = true;
+    const wrong = shuffle([0, 1, 2, 3].filter((n) => n !== boss.q.answer)).slice(0, 2);
+    const buttons = $("boss-options").children;
+    wrong.forEach((n) => { buttons[n].disabled = true; buttons[n].classList.add("removed"); });
+    fx.play("click");
+  }
+  player.inventory[id]--;
+  savePlayer();
+  updateBossHud();
+  renderPowers();
 }
 
 function showDamage(amount, crit) {
@@ -744,10 +1147,12 @@ function showDamage(amount, crit) {
 
 function bossAnswer(choice) {
   if (!boss.active || boss.locked) return;
+  if (choice >= 0 && $("boss-options").children[choice]?.disabled) return; // removed by 50/50
   boss.locked = true;
   cancelAnimationFrame(boss.raf);
+  renderPowers();
   const q = boss.q;
-  const left = Math.max(0, 1 - (performance.now() - boss.qStart) / boss.limit);
+  const left = timeLeft();
   $("boss-options").querySelectorAll(".option").forEach((b, n) => {
     b.disabled = true;
     if (n === q.answer) b.classList.add("correct");
@@ -814,7 +1219,11 @@ function endBoss(won) {
     const best = Number(safeGet(bossKey()));
     if (!best || secs < best) { safeSet(bossKey(), String(secs)); record = true; }
   }
-  const rank = boss.hearts === BOSS.hearts && accuracy >= 90 ? "S" : boss.hearts >= 2 ? "A" : "B";
+  const rank = boss.hearts >= BOSS.hearts && accuracy >= 90 ? "S" : boss.hearts >= 2 ? "A" : "B";
+  const base = won
+    ? 50 + { S: 60, A: 30, B: 10 }[rank] + Math.min(boss.maxCombo * 5, 40) + (boss.missed.size === 0 ? 25 : 0)
+    : Math.min(boss.right * 2, 20);
+  const got = award(base, won ? "for beating the boss" : "for the hits you landed", "boss", { win: won });
 
   if (won) { confetti(120); fx.play("win"); } else fx.play("lose");
   const card = el("div", "quiz-card boss-end");
@@ -828,6 +1237,14 @@ function endBoss(won) {
       stats.append(box);
     });
   card.append(stats);
+  if (got > 0) {
+    const prize = el("p", "prize-line");
+    prize.append(el("strong", "", `+${got} tickets`));
+    if (got < base) prize.append(el("span", "muted small", " Replays of the same boss today earn fewer tickets."));
+    else if (player.crew) prize.append(el("span", "muted small", ` Added to ${player.crew.name}'s leaderboard.`));
+    else prize.append(el("span", "muted small", " Spend them at the prize counter, or start a crew to compete with friends."));
+    card.append(prize);
+  }
   if (record) card.append(el("p", "record", "New best time!"));
   if (boss.missed.size) {
     card.append(el("p", "label", "Review these before the rematch"));

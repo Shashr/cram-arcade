@@ -13,6 +13,11 @@ Paste your class notes or type a topic, and Cram Arcade uses AI (Claude) to turn
   (`term - answer`, one per line; Quizlet exports work). A quiz is made from your cards.
 - **Saved sets**: every set you make is saved in your browser so you can come back to it.
 - Sound effects (with an on/off switch), confetti, and game-style animations.
+- **Tickets and the prize counter**: win arcade tickets in every game (most from boss
+  battles) and spend them on power-ups (extra heart, time freeze, 50/50) and nameplates.
+  Replaying the same set on the same day earns fewer tickets.
+- **Crew leaderboards**: start a crew, share the 5-letter code, and compete with friends
+  for the most tickets this week and all time.
 
 **Live site:** _add your Vercel link here_
 
@@ -42,8 +47,22 @@ Browser (index.html, app.js)  ──POST /api/generate──▶  Serverless func
 ## Deploy
 
 The site is hosted on [Vercel](https://vercel.com). Vercel serves the static files and runs
-`api/generate.js` as a serverless function. The API key is stored as the environment
+the files in `api/` as serverless functions. The API key is stored as the environment
 variable `ANTHROPIC_API_KEY` in the Vercel project settings.
+
+### Turning on crew leaderboards online
+
+Crews need a small database so friends' scores are shared. Without one, the leaderboard
+runs in **test mode** (only on one computer, wiped when the server restarts).
+
+1. In your Vercel project, open the **Storage** tab and click **Create Database**.
+2. Pick **Upstash for Redis** (free plan) and connect it to this project.
+3. Vercel adds `KV_REST_API_URL` and `KV_REST_API_TOKEN` to the project automatically.
+4. Go to **Deployments** and **Redeploy** the latest one.
+
+`api/crew.js` also accepts `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` if you
+create the database on upstash.com directly. Scores come from players' browsers, so a
+determined friend could fake theirs; the server caps how many tickets one report can add.
 
 ## What I learned / what's next
 

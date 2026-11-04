@@ -18,7 +18,39 @@
     </div>
     <p class="tagline">Turn your notes into games.</p>
     <button id="sound-btn" class="chip-btn sound-btn" type="button" aria-pressed="true">Sound: on</button>
+    <div class="player-bar">
+      <span class="ticket-count" id="ticket-count">
+        <svg class="ticket-icon" viewBox="0 0 32 20" aria-hidden="true"><path d="M2 3h28v4a3 3 0 0 0 0 6v4H2v-4a3 3 0 0 0 0-6z"/><path class="ticket-dash" d="M21 4v12"/></svg>
+        <strong id="ticket-num">0</strong> tickets
+      </span>
+      <button id="open-shop" class="chip-btn" type="button">Prize counter</button>
+      <button id="open-crew" class="chip-btn" type="button">Crew leaderboard</button>
+    </div>
   </header>
+
+  <div class="ticket-toast" id="ticket-toast" role="status" aria-live="polite"></div>
+
+  <dialog id="shop" class="sheet" aria-labelledby="shop-title">
+    <div class="sheet-head">
+      <h2 id="shop-title">Prize counter</h2>
+      <span class="sheet-tickets"><strong id="shop-tickets">0</strong> tickets to spend</span>
+      <button class="sheet-close" type="button" data-close aria-label="Close">×</button>
+    </div>
+    <h3 class="sheet-sub">Power-ups</h3>
+    <p class="muted small">Use them during a boss battle.</p>
+    <div id="shop-powerups" class="shop-grid"></div>
+    <h3 class="sheet-sub">Nameplates</h3>
+    <p class="muted small">Your nameplate shows on your crew's leaderboard.</p>
+    <div id="shop-plates" class="shop-grid"></div>
+  </dialog>
+
+  <dialog id="crew" class="sheet" aria-labelledby="crew-title">
+    <div class="sheet-head">
+      <h2 id="crew-title">Crew leaderboard</h2>
+      <button class="sheet-close" type="button" data-close aria-label="Close">×</button>
+    </div>
+    <div id="crew-body"></div>
+  </dialog>
 
   <main class="wrap">
     <section class="panel maker-wrap" aria-label="Make a study set">
