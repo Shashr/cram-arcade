@@ -1747,7 +1747,7 @@ function reportCardsSoon() {
 }
 
 /* ----- The Classroom sheet ----- */
-const classUi = { role: safeGet("cram-class-role") || "student", dashboard: null, setTitle: null, busy: false };
+const classUi = { role: safeGet("cram-class-role") || "student", dashboard: null, setTitle: null, tab: "overview", student: null };
 
 function roleSwitch() {
   const sw = el("div", "switch");
@@ -1934,6 +1934,7 @@ function renderTeacher(body) {
 async function openDashboard(code) {
   const mine = (player.teaching || []).find((c) => c.code === code);
   if (!mine) return;
+  if (classUi.dashboard?.code !== code) { classUi.student = null; classUi.tab = "overview"; }
   classUi.role = "teacher";
   const body = $("class-body");
   body.innerHTML = '<p class="muted">Loading your class…</p>';
@@ -1968,6 +1969,286 @@ function ago(ms) {
   return days === 1 ? "Yesterday" : `${days} days ago`;
 }
 
+/* ----- Charts for the teacher dashboard (plain SVG, no libraries) ----- */
+const SVG_NS = "http://www.w3.org/2000/svg";
+function svgEl(tag, attrs = {}) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  return node;
+}
+function niceMax(v) {
+  if (v <= 4) return Math.max(1, Math.ceil(v));
+  const step = 10 ** Math.floor(Math.log10(v));
+  return Math.ceil(v / step) * step;
+}
+function chartTip(wrap) {
+  let tip = wrap.querySelector(".chart-tip");
+  if (!tip) { tip = el("div", "chart-tip"); tip.hidden = true; wrap.append(tip); }
+  return tip;
+}
+function showTip(wrap, x, y, valueText, labelText, color) {
+  const tip = chartTip(wrap);
+  tip.innerHTML = "";
+  const v = el("strong", "", valueText);
+  if (color) { const key = el("span", "tip-key"); key.style.background = color; tip.append(key); }
+  tip.append(v, el("span", "", labelText));
+  tip.hidden = false;
+  const box = wrap.getBoundingClientRect();
+  const left = Math.min(Math.max(x, 70), box.width - 70);
+  tip.style.left = `${left}px`;
+  tip.style.top = `${Math.max(0, y - 8)}px`;
+}
+function hideTip(wrap) { const tip = wrap.querySelector(".chart-tip"); if (tip) tip.hidden = true; }
+
+// Vertical bars, one series. data = [{ label, short, value, tip }]
+function barChart(data, { name }) {
+  const W = 360, H = 170, L = 30, R = 6, T = 10, B = 24;
+  const wrap = el("div", "chart");
+  const max = niceMax(Math.max(...data.map((d) => d.value), 1));
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "group", "aria-label": name });
+  const y = (v) => T + (H - T - B) * (1 - v / max);
+  for (const g of [0, max / 2, max]) {
+    if (g !== Math.round(g)) continue;
+    svg.append(svgEl("line", { x1: L, x2: W - R, y1: y(g), y2: y(g), class: g === 0 ? "axis" : "grid" }));
+    const t = svgEl("text", { x: L - 6, y: y(g) + 4, class: "tick", "text-anchor": "end" });
+    t.textContent = String(g);
+    svg.append(t);
+  }
+  const band = (W - L - R) / data.length;
+  const bw = Math.min(34, band * 0.7);
+  const every = data.length > 8 ? 2 : 1;
+  data.forEach((d, i) => {
+    const cx = L + band * i + band / 2;
+    const g = svgEl("g", { class: "bar", tabindex: "0", role: "img", "aria-label": `${d.label}: ${d.value}` });
+    const top = y(d.value);
+    const base = y(0);
+    if (d.value > 0) {
+      const r = Math.min(4, (base - top) / 2, bw / 2);
+      const x0 = cx - bw / 2;
+      g.append(svgEl("path", {
+        class: "bar-fill",
+        d: `M${x0},${base} V${top + r} Q${x0},${top} ${x0 + r},${top} H${x0 + bw - r} Q${x0 + bw},${top} ${x0 + bw},${top + r} V${base} Z`,
+      }));
+    }
+    g.append(svgEl("rect", { class: "hit", x: L + band * i, y: T, width: band, height: H - T - B }));
+    if (i % every === (data.length - 1) % every) {
+      const t = svgEl("text", { x: cx, y: H - 7, class: "tick", "text-anchor": "middle" });
+      t.textContent = d.short ?? d.label;
+      g.append(t);
+    }
+    const show = () => {
+      const s = svg.getBoundingClientRect();
+      showTip(wrap, (cx / W) * s.width, (top / H) * s.height, String(d.value), `${d.label}: ${d.tip}`);
+    };
+    g.addEventListener("pointerenter", show);
+    g.addEventListener("focus", show);
+    g.addEventListener("pointerleave", () => hideTip(wrap));
+    g.addEventListener("blur", () => hideTip(wrap));
+    svg.append(g);
+  });
+  wrap.append(svg);
+  return wrap;
+}
+
+// Score over time for one student: quiz % and boss battle accuracy, one point per game.
+function scoreChart(attempts) {
+  const wrap = el("div", "chart");
+  const games = [...attempts].sort((a, b) => a.t - b.t).slice(-40);
+  if (games.length < 2) {
+    wrap.append(el("p", "muted small chart-empty", "The chart appears after 2 or more quiz or boss games on this set."));
+    return wrap;
+  }
+  const W = 660, H = 250, L = 40, R = 52, T = 12, B = 24;
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", tabindex: "0",
+    "aria-label": `Scores over ${games.length} games. Use the arrow keys to read each game.` });
+  const x = (i) => L + ((W - L - R) * i) / (games.length - 1);
+  const y = (v) => T + (H - T - B) * (1 - v / 100);
+  for (const g of [0, 50, 100]) {
+    svg.append(svgEl("line", { x1: L, x2: W - R, y1: y(g), y2: y(g), class: g === 0 ? "axis" : "grid" }));
+    const t = svgEl("text", { x: L - 6, y: y(g) + 4, class: "tick", "text-anchor": "end" });
+    t.textContent = `${g}%`;
+    svg.append(t);
+  }
+  const first = svgEl("text", { x: L, y: H - 6, class: "tick", "text-anchor": "start" });
+  first.textContent = "First game";
+  const last = svgEl("text", { x: W - R, y: H - 6, class: "tick", "text-anchor": "end" });
+  last.textContent = "Latest";
+  svg.append(first, last);
+  const cross = svgEl("line", { class: "crosshair", y1: T, y2: H - B, visibility: "hidden" });
+  svg.append(cross);
+  const series = [
+    { kind: "quiz", name: "Quiz score", short: "Quiz", cls: "s-quiz" },
+    { kind: "boss", name: "Boss accuracy", short: "Boss", cls: "s-boss" },
+  ];
+  for (const s of series) {
+    const pts = games.map((g, i) => ({ g, i })).filter(({ g }) => g.kind === s.kind);
+    if (!pts.length) continue;
+    if (pts.length > 1) svg.append(svgEl("polyline", { class: `line ${s.cls}`, points: pts.map(({ g, i }) => `${x(i)},${y(g.pct)}`).join(" ") }));
+    for (const { g, i } of pts) svg.append(svgEl("circle", { class: `dot ${s.cls}`, cx: x(i), cy: y(g.pct), r: 4 }));
+    const end = pts[pts.length - 1];
+    const label = svgEl("text", { x: x(end.i) + 8, y: y(end.g.pct) + 4, class: "direct-label" });
+    label.textContent = s.short;
+    svg.append(label);
+  }
+  const colorOf = (kind) => getComputedStyle(document.documentElement).getPropertyValue(kind === "quiz" ? "--chart-quiz" : "--chart-boss").trim();
+  let focusIdx = games.length - 1;
+  const point = (i) => {
+    focusIdx = i;
+    const g = games[i];
+    cross.setAttribute("x1", x(i));
+    cross.setAttribute("x2", x(i));
+    cross.setAttribute("visibility", "visible");
+    const s = svg.getBoundingClientRect();
+    const when = new Date(g.t).toLocaleDateString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const what = g.kind === "quiz" ? "Quiz score" : `Boss accuracy${g.won ? ", won" : ", lost"}`;
+    showTip(wrap, (x(i) / W) * s.width, (y(g.pct) / H) * s.height, `${g.pct}%`, `${what}, game ${i + 1}, ${when}`, colorOf(g.kind));
+  };
+  svg.addEventListener("pointermove", (e) => {
+    const s = svg.getBoundingClientRect();
+    const px = ((e.clientX - s.left) / s.width) * W;
+    const i = Math.round(((px - L) / (W - L - R)) * (games.length - 1));
+    point(Math.max(0, Math.min(games.length - 1, i)));
+  });
+  svg.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(wrap); });
+  svg.addEventListener("focus", () => point(focusIdx));
+  svg.addEventListener("blur", () => { cross.setAttribute("visibility", "hidden"); hideTip(wrap); });
+  svg.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      point(Math.max(0, Math.min(games.length - 1, focusIdx + (e.key === "ArrowRight" ? 1 : -1))));
+    }
+  });
+  const legend = el("div", "chart-legend");
+  for (const s of series) {
+    if (!games.some((g) => g.kind === s.kind)) continue;
+    const item = el("span", "legend-item");
+    item.append(el("span", `legend-line ${s.cls}`), s.name);
+    legend.append(item);
+  }
+  wrap.append(legend, svg);
+  return wrap;
+}
+
+// Questions as horizontal bars of "% wrong".
+function renderQuestionBars(body, questions, limit) {
+  if (!questions.length) {
+    body.append(el("p", "muted", "Nothing yet. These show up once students start playing."));
+    return;
+  }
+  const list = el("ol", "qbars");
+  for (const q of questions.slice(0, limit)) {
+    const li = el("li");
+    const top = el("div", "qbar-top");
+    top.append(el("span", "qbar-q", q.prompt), el("strong", "qbar-pct", `${q.rate}% wrong`));
+    const track = el("div", "qbar-track");
+    const fill = el("span", "qbar-fill");
+    fill.style.width = `${Math.max(2, q.rate)}%`;
+    track.append(fill);
+    li.append(top, track, el("span", "muted small", `Wrong ${q.count} of ${q.asked} time${q.asked === 1 ? "" : "s"} asked`));
+    list.append(li);
+  }
+  body.append(list);
+}
+
+function renderStudentTable(body, rows, d, mine) {
+  if (!rows.length) {
+    body.append(el("p", "muted", "No students yet. Share the class code to get started."));
+    return;
+  }
+  body.append(el("p", "muted small", "Click a name to see that student's scores over time and the questions they miss."));
+  const wrap = el("div", "table-wrap");
+  const table = el("table", "dash-table");
+  table.innerHTML = "<thead><tr><th>Name</th><th>Games</th><th>Best quiz</th><th>Boss battle</th><th>Flashcards</th><th>Last active</th><th><span class=\"sr-only\">Remove</span></th></tr></thead>";
+  const tbody = el("tbody");
+  rows.sort((a, b) => (b.p?.last || 0) - (a.p?.last || 0) || a.name.localeCompare(b.name));
+  for (const r of rows) {
+    const tr = el("tr");
+    const p = r.p;
+    const nameTd = el("td", "name");
+    const nameBtn = el("button", "link-btn", r.name);
+    nameBtn.type = "button";
+    nameBtn.addEventListener("click", () => { classUi.student = r.id; renderDashboard(); });
+    nameTd.append(nameBtn);
+    tr.append(nameTd);
+    const quizCell = p?.quizBest != null ? `${p.quizBest}%` : "–";
+    const bossCell = !p?.bossFights ? "–"
+      : p.bossWins ? `Won${p.bossWins > 1 ? ` ×${p.bossWins}` : ""}, best ${Math.round(p.bestBossTime)}s`
+      : `${p.bossFights} ${p.bossFights === 1 ? "try" : "tries"}, ${p.bestAccuracy}% right`;
+    const cardsCell = p?.cardsTotal ? `${p.cardsKnown} / ${p.cardsTotal}` : "–";
+    for (const [text, cls] of [[String(r.attempts.length), "num"], [quizCell, p?.quizBest >= 80 ? "good" : p?.quizBest != null && p.quizBest < 50 ? "low" : ""], [bossCell, p?.bossWins ? "good" : ""], [cardsCell, ""], [ago(p?.last), "muted"]]) {
+      tr.append(el("td", cls, text));
+    }
+    const td = el("td");
+    const del = el("button", "test-remove", "×");
+    del.type = "button";
+    del.setAttribute("aria-label", `Remove ${r.name} from the class`);
+    del.addEventListener("click", async () => {
+      try { await classApi({ action: "removeStudent", code: d.code, teacherKey: mine.key, playerId: r.id }); } catch { /* ignore */ }
+      openDashboard(d.code);
+    });
+    td.append(del);
+    tr.append(td);
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  wrap.append(table);
+  body.append(wrap);
+}
+
+function renderStudentDetail(body, r) {
+  const back = el("button", "btn btn-quiet small-btn", "‹ All students");
+  back.type = "button";
+  back.addEventListener("click", () => { classUi.student = null; classUi.tab = "students"; renderDashboard(); });
+  body.append(back);
+  body.append(el("h3", "student-name", r.name));
+  const p = r.p || {};
+  const quizGames = r.attempts.filter((a) => a.kind === "quiz");
+  const bossGames = r.attempts.filter((a) => a.kind === "boss");
+  const avg = (list) => list.length ? `${Math.round(list.reduce((n, a) => n + a.pct, 0) / list.length)}%` : "–";
+  const stats = el("div", "stats dash-stats");
+  [
+    [String(r.attempts.length), "Games played"],
+    [p.quizBest != null ? `${p.quizBest}%` : "–", `Best quiz (average ${avg(quizGames)})`],
+    [bossGames.length ? `${bossGames.filter((g) => g.won).length} / ${bossGames.length}` : "–", "Boss fights won"],
+    [p.cardsTotal ? `${p.cardsKnown} / ${p.cardsTotal}` : "–", "Flashcards known"],
+  ].forEach(([v, l]) => { const b = el("div"); b.append(el("strong", "", v), el("span", "", l)); stats.append(b); });
+  body.append(stats);
+
+  const chart = el("figure", "chart-card");
+  chart.append(el("figcaption", "chart-title", "Scores over time"));
+  chart.append(scoreChart(r.attempts));
+  body.append(chart);
+
+  body.append(el("h3", "sheet-sub", `Questions ${r.name} gets wrong`));
+  if (!r.misses.length) body.append(el("p", "muted", r.attempts.length ? "None so far. Nice." : "Nothing yet."));
+  else {
+    const list = el("ol", "trouble");
+    const max = r.misses[0].count;
+    for (const m of r.misses.slice(0, 10)) {
+      const li = el("li");
+      const bar = el("span", "trouble-bar");
+      bar.style.width = `${Math.max(8, (m.count / max) * 100)}%`;
+      li.append(el("span", "trouble-q", m.prompt), el("span", "trouble-n", `wrong ${m.count}×`), bar);
+      list.append(li);
+    }
+    body.append(list);
+  }
+
+  if (r.attempts.length) {
+    body.append(el("h3", "sheet-sub", "Recent games"));
+    const recent = el("ul", "recent");
+    for (const a of [...r.attempts].sort((x, y) => y.t - x.t).slice(0, 8)) {
+      const li = el("li");
+      const when = new Date(a.t).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      li.append(el("span", `recent-kind k-${a.kind}`, a.kind === "quiz" ? "Quiz" : "Boss"),
+        el("strong", "", a.kind === "quiz" ? `${a.pct}%` : `${a.won ? "Won" : "Lost"}, ${a.pct}% right`),
+        el("span", "muted small", when));
+      recent.append(li);
+    }
+    body.append(recent);
+  }
+}
+
 function renderDashboard() {
   const d = classUi.dashboard;
   const mine = player.teaching.find((c) => c.code === d.code);
@@ -1977,7 +2258,7 @@ function renderDashboard() {
   const top = el("div", "dash-head");
   const back = el("button", "btn btn-quiet small-btn", "‹ All classes");
   back.type = "button";
-  back.addEventListener("click", () => { classUi.dashboard = null; renderClassroom(); });
+  back.addEventListener("click", () => { classUi.dashboard = null; classUi.student = null; classUi.tab = "overview"; renderClassroom(); });
   const refresh = el("button", "btn small-btn", "Refresh");
   refresh.type = "button";
   refresh.addEventListener("click", () => openDashboard(d.code));
@@ -2032,74 +2313,99 @@ function renderDashboard() {
     body.append(pickRow);
   }
   const setTitle = classUi.setTitle;
-  const rows = d.students.map((s) => ({ ...s, p: s.progress[setTitle] || null }));
+  const rows = d.students.map((s) => ({
+    ...s,
+    p: s.progress[setTitle] || null,
+    attempts: (s.history || []).filter((h) => h.set === setTitle),
+    misses: (s.missed || []).filter((m) => m.set === setTitle),
+  }));
+  const questions = d.trouble.filter((t) => t.set === setTitle);
 
-  // Summary numbers
-  const played = rows.filter((r) => r.p);
-  const quizScores = played.map((r) => r.p.quizBest).filter((v) => v != null);
-  const stats = el("div", "stats dash-stats");
-  [
-    [String(d.students.length), "Students joined"],
-    [String(played.length), `Played ${d.sets.length > 1 ? "this set" : "so far"}`],
-    [quizScores.length ? `${Math.round(quizScores.reduce((a, b) => a + b, 0) / quizScores.length)}%` : "–", "Average best quiz"],
-    [String(played.filter((r) => r.p.bossWins > 0).length), "Beat the boss"],
-  ].forEach(([v, l]) => { const b = el("div"); b.append(el("strong", "", v), el("span", "", l)); stats.append(b); });
-  body.append(stats);
+  // A single student's page
+  const student = classUi.student && rows.find((r) => r.id === classUi.student);
+  if (student) {
+    renderStudentDetail(body, student);
+    return;
+  }
+  classUi.student = null;
 
-  // Students table
-  body.append(el("h3", "sheet-sub", "Students"));
-  if (!rows.length) {
-    body.append(el("p", "muted", "No students yet. Share the class code to get started."));
+  // Tabs
+  const tabs = el("div", "switch dash-tabs");
+  tabs.setAttribute("role", "tablist");
+  for (const [id, label] of [["overview", "Overview"], ["students", `Students (${rows.length})`], ["questions", "Questions"]]) {
+    const t = el("button", "tab", label);
+    t.type = "button";
+    t.setAttribute("role", "tab");
+    t.setAttribute("aria-selected", String(classUi.tab === id));
+    t.addEventListener("click", () => { classUi.tab = id; renderDashboard(); });
+    tabs.append(t);
+  }
+  body.append(tabs);
+
+  if (classUi.tab === "students") {
+    renderStudentTable(body, rows, d, mine);
+  } else if (classUi.tab === "questions") {
+    body.append(el("p", "muted small", "Every question students have answered in the quiz and boss battle, hardest first. \"% wrong\" is out of all the times it was asked."));
+    renderQuestionBars(body, questions, 100);
   } else {
-    const wrap = el("div", "table-wrap");
-    const table = el("table", "dash-table");
-    table.innerHTML = "<thead><tr><th>Name</th><th>Best quiz</th><th>Boss battle</th><th>Flashcards</th><th>Last active</th><th><span class=\"sr-only\">Remove</span></th></tr></thead>";
-    const tbody = el("tbody");
-    rows.sort((a, b) => (b.p?.last || 0) - (a.p?.last || 0) || a.name.localeCompare(b.name));
-    for (const r of rows) {
-      const tr = el("tr");
-      const p = r.p;
-      const quizCell = p?.quizBest != null ? `${p.quizBest}%` : "–";
-      const bossCell = !p?.bossFights ? "–"
-        : p.bossWins ? `Won${p.bossWins > 1 ? ` ×${p.bossWins}` : ""}, best ${Math.round(p.bestBossTime)}s`
-        : `${p.bossFights} ${p.bossFights === 1 ? "try" : "tries"}, ${p.bestAccuracy}% right`;
-      const cardsCell = p?.cardsTotal ? `${p.cardsKnown} / ${p.cardsTotal}` : "–";
-      for (const [text, cls] of [[r.name, "name"], [quizCell, p?.quizBest >= 80 ? "good" : p?.quizBest != null && p.quizBest < 50 ? "low" : ""], [bossCell, p?.bossWins ? "good" : ""], [cardsCell, ""], [ago(p?.last), "muted"]]) {
-        tr.append(el("td", cls, text));
-      }
-      const td = el("td");
-      const del = el("button", "test-remove", "×");
-      del.type = "button";
-      del.setAttribute("aria-label", `Remove ${r.name} from the class`);
-      del.addEventListener("click", async () => {
-        try { await classApi({ action: "removeStudent", code: d.code, teacherKey: mine.key, playerId: r.id }); } catch { /* ignore */ }
-        openDashboard(d.code);
-      });
-      td.append(del);
-      tr.append(td);
-      tbody.append(tr);
+    // Overview
+    const played = rows.filter((r) => r.p);
+    const quizScores = played.map((r) => r.p.quizBest).filter((v) => v != null);
+    const stats = el("div", "stats dash-stats");
+    [
+      [String(d.students.length), "Students joined"],
+      [String(played.length), `Played ${d.sets.length > 1 ? "this set" : "so far"}`],
+      [quizScores.length ? `${Math.round(quizScores.reduce((a, b) => a + b, 0) / quizScores.length)}%` : "–", "Average best quiz"],
+      [String(played.filter((r) => r.p.bossWins > 0).length), "Beat the boss"],
+    ].forEach(([v, l]) => { const b = el("div"); b.append(el("strong", "", v), el("span", "", l)); stats.append(b); });
+    body.append(stats);
+
+    const charts = el("div", "dash-charts");
+    // Activity: quiz and boss attempts per day, last 14 days
+    const days = [];
+    for (let i = 13; i >= 0; i--) {
+      const day = new Date();
+      day.setHours(0, 0, 0, 0);
+      day.setDate(day.getDate() - i);
+      days.push(day);
     }
-    table.append(tbody);
-    wrap.append(table);
-    body.append(wrap);
+    const perDay = days.map((day) => {
+      const next = day.getTime() + 86_400_000;
+      const count = rows.reduce((n, r) => n + r.attempts.filter((h) => h.t >= day.getTime() && h.t < next).length, 0);
+      const label = day.toLocaleDateString([], { month: "short", day: "numeric" });
+      return { label, short: String(day.getDate()), value: count, tip: `${count} game${count === 1 ? "" : "s"} played` };
+    });
+    const activity = el("figure", "chart-card");
+    activity.append(el("figcaption", "chart-title", "Games played, last 14 days"));
+    activity.append(barChart(perDay, { name: "Games played per day" }));
+    charts.append(activity);
+
+    // Distribution of best quiz scores
+    const buckets = [["Under 50%", 0, 49], ["50–69%", 50, 69], ["70–84%", 70, 84], ["85–100%", 85, 100]].map(([label, lo, hi]) => {
+      const who = rows.filter((r) => r.p?.quizBest != null && r.p.quizBest >= lo && r.p.quizBest <= hi);
+      return { label, short: label, value: who.length, tip: who.length ? who.map((r) => r.name).join(", ") : "No students" };
+    });
+    const dist = el("figure", "chart-card");
+    dist.append(el("figcaption", "chart-title", "Students by best quiz score"));
+    dist.append(barChart(buckets, { name: "Students by best quiz score", integer: true }));
+    charts.append(dist);
+    body.append(charts);
+
+    const head = el("div", "section-head");
+    head.append(el("h3", "sheet-sub", "Trouble spots"));
+    if (questions.length > 5) {
+      const all = el("button", "link-btn", "See all questions");
+      all.type = "button";
+      all.addEventListener("click", () => { classUi.tab = "questions"; renderDashboard(); });
+      head.append(all);
+    }
+    body.append(head);
+    renderQuestionBars(body, questions, 5);
   }
 
-  // Trouble spots
-  body.append(el("h3", "sheet-sub", "Trouble spots"));
-  body.append(el("p", "muted small", "The questions your class gets wrong most often, across the quiz and boss battle."));
-  const trouble = d.trouble.filter((t) => t.set === setTitle).slice(0, 8);
-  if (!trouble.length) body.append(el("p", "muted", "Nothing yet. These show up once students start playing."));
-  else {
-    const max = trouble[0].count;
-    const list = el("ol", "trouble");
-    for (const t of trouble) {
-      const li = el("li");
-      const bar = el("span", "trouble-bar");
-      bar.style.width = `${Math.max(8, (t.count / max) * 100)}%`;
-      li.append(el("span", "trouble-q", t.prompt), el("span", "trouble-n", `missed ${t.count}×`), bar);
-      list.append(li);
-    }
-    body.append(list);
+  if (classUi.tab !== "overview") {
+    if (d.database === "test") body.append(el("p", "muted small test-note", "Test mode: this class only lives on this computer until the server restarts."));
+    return;
   }
 
   // Assigned sets
@@ -2361,7 +2667,7 @@ function renderQuizResult() {
   if (pct === 100) { confetti(); fx.play("win"); }
   else fx.play(pct >= 70 ? "pair" : "lose");
   award(quiz.score * 5 + (pct === 100 ? 20 : 0), pct === 100 ? "for a perfect quiz" : "for your quiz answers", "quiz");
-  reportToClass({ kind: "quiz", score: quiz.score, total, missed: quiz.missed });
+  reportToClass({ kind: "quiz", score: quiz.score, total, missed: quiz.missed, asked: state.set.quiz.map((q) => q.question) });
   const again = document.createElement("button");
   again.type = "button";
   again.className = "btn btn-primary";
@@ -2535,7 +2841,7 @@ function startBoss() {
   const max = Math.min(pool.length, BOSS.maxQuestionsForHp) * BOSS.hpPerQuestion;
   Object.assign(boss, {
     active: true, pool, qi: 0, max, hp: max, hearts: BOSS.hearts, maxHearts: BOSS.hearts, combo: 0, maxCombo: 0,
-    right: 0, answered: 0, missed: new Map(), start: Date.now(), locked: false, enraged: false,
+    right: 0, answered: 0, missed: new Map(), asked: new Set(), start: Date.now(), locked: false, enraged: false,
     heartUsed: false, frozen: false, fiftyUsed: false,
   });
   body.innerHTML = `
@@ -2591,6 +2897,7 @@ function nextBossQuestion() {
   if (!boss.active) return;
   if (boss.qi >= boss.pool.length) { boss.pool = shuffle(boss.pool); boss.qi = 0; }
   const q = boss.pool[boss.qi++];
+  boss.asked.add(q.prompt);
   boss.q = q;
   boss.locked = false;
   boss.frozen = false;
@@ -2762,7 +3069,7 @@ function endBoss(won) {
     ? 50 + { S: 60, A: 30, B: 10 }[rank] + Math.min(boss.maxCombo * 5, 40) + (boss.missed.size === 0 ? 25 : 0)
     : Math.min(boss.right * 2, 20);
   const got = award(base, won ? "for beating the boss" : "for the hits you landed", "boss", { win: won });
-  reportToClass({ kind: "boss", won, accuracy, secs, missed: [...boss.missed.keys()] });
+  reportToClass({ kind: "boss", won, accuracy, secs, missed: [...boss.missed.keys()], asked: [...boss.asked] });
 
   if (won) { confetti(120); fx.play("win"); } else fx.play("lose");
   const card = el("div", "quiz-card boss-end");
