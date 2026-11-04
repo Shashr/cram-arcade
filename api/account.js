@@ -108,7 +108,8 @@ export default async function handler(req, res) {
       } catch (err) {
         return res.status(401).json({ error: err.message });
       }
-      const { sub, ...profile } = who;
+      const { sub, ...rest } = who;
+      const profile = { ...rest, provider: microsoft ? "microsoft" : "google" };
       await db.set(`${userKey(sub)}:profile`, JSON.stringify(profile));
       const { data } = await loadUser(sub);
       return res.status(200).json({ session: makeSession(sub), profile, data });

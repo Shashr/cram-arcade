@@ -261,14 +261,22 @@ main { display: grid; gap: 28px; padding-block: 24px 40px; }
 .avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .gsi-holder { min-height: 44px; }
 .signin-buttons { display: grid; gap: 10px; justify-items: start; margin: 10px 0 4px; }
-.ms-btn {
+.brand-btn {
   display: inline-flex; align-items: center; gap: 12px;
-  height: 44px; padding: 0 18px 0 14px;
-  font: 600 15px/1 "Segoe UI", system-ui, sans-serif; color: #ffffff;
-  background: #2f2f2f; border: 1px solid #8c8c8c; border-radius: 999px; cursor: pointer;
+  height: 44px; min-width: 240px; padding: 0 18px 0 14px;
+  font: 600 15px/1 "Segoe UI", Roboto, system-ui, sans-serif;
+  border-radius: 999px; cursor: pointer;
 }
-.ms-btn:hover { background: #3c3c3c; }
-.ms-btn svg { width: 20px; height: 20px; }
+.brand-btn .brand-logo { width: 20px; height: 20px; flex-shrink: 0; }
+.brand-microsoft { color: #ffffff; background: #2f2f2f; border: 1px solid #8c8c8c; }
+.brand-microsoft:hover:not(:disabled) { background: #3c3c3c; }
+.brand-google { color: #1f1f1f; background: #ffffff; border: 1px solid #747775; }
+.brand-google:hover:not(:disabled) { background: #f2f2f2; }
+.brand-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.account-chip { display: inline-flex; align-items: center; gap: 6px; }
+.account-chip .brand-logo { width: 15px; height: 15px; background: #ffffff; border-radius: 3px; padding: 1px; }
+.signed-via { display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; color: var(--muted); }
+.signed-via .brand-logo { width: 14px; height: 14px; }
 .share-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .share-row .teams-btn {
   display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
