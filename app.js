@@ -846,14 +846,40 @@ async function signIn(payload) {
     fx.play("bad");
   }
 }
-function signOut(expired = false) {
+// Signing out saves everything to the account first, then clears this device back to a
+// fresh guest (so the next person on this phone or computer doesn't see your tickets).
+// Signing in again brings it all back. If the session expired we can't save, so we keep
+// the progress here and merge it when you sign in again.
+const LOCAL_KEYS = [PLAYER_KEY, SAVED_KEY, "cram-plays", "cram-asked-notify", "cram-hide-promo"];
+async function signOut(expired = false) {
+  if (!expired && safeGet(SESSION_KEY)) {
+    const status = $("account-status");
+    if (status) { status.className = "status"; status.textContent = "Saving your progress…"; }
+    clearTimeout(syncTimer);
+    try {
+      while (account.syncing) await new Promise((r) => setTimeout(r, 200));
+      await accountApi({ action: "save", data: localData() });
+    } catch {
+      if (status) { status.classList.add("error"); status.textContent = "Couldn't save your progress, so you're still signed in. Check your connection and try again."; }
+      return;
+    }
+  }
   safeSet(SESSION_KEY, "");
   safeSet("cram-profile", "null");
   account.profile = null;
-  account.error = expired ? "Your sign-in expired. Sign in again to keep syncing." : "";
   try { window.google?.accounts.id.disableAutoSelect(); } catch { /* ignore */ }
-  renderAccountChip();
-  if ($("account").open) renderAccount();
+  if (expired) {
+    account.error = "Your sign-in expired. Sign in again to keep syncing.";
+    renderAccountChip();
+    if ($("account").open) renderAccount();
+    return;
+  }
+  try {
+    for (const k of LOCAL_KEYS) localStorage.removeItem(k);
+    for (const k of Object.keys(localStorage)) if (k.startsWith("cram-best:") || k.startsWith("cram-boss:")) localStorage.removeItem(k);
+  } catch { /* storage blocked */ }
+  safeSet("cram-signed-out", "yes");
+  location.reload();
 }
 
 // Official sign-in marks, used on the sign-in buttons and next to your name once signed in.
@@ -919,6 +945,7 @@ async function renderAccount() {
     body.append(el("p", "", "Your tickets, saved sets, tests and records sync to your account, so they're the same on every device."));
     const note = account.error ? el("p", "status error", account.error)
       : el("p", "muted small", account.syncing ? "Syncing…" : account.syncedAt ? `Synced at ${new Date(account.syncedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.` : "");
+    note.id = "account-status";
     body.append(note);
     const row = el("div", "maker-row");
     const sync = el("button", "btn", "Sync now");
@@ -927,6 +954,7 @@ async function renderAccount() {
     const out = el("button", "btn btn-quiet", "Sign out");
     out.type = "button";
     out.addEventListener("click", () => signOut());
+    body.append(el("p", "muted small", "Signing out saves your progress to your account and clears it from this device."));
     row.append(sync, out);
     body.append(row);
     return;
@@ -1441,6 +1469,10 @@ function planSessions(test) {
   return added;
 }
 
+if (safeGet("cram-signed-out") === "yes") {
+  safeSet("cram-signed-out", "");
+  setTimeout(() => ticketToastText("Signed out. Your progress is saved to your account."), 300);
+}
 function ticketToastText(text) {
   const toast = $("ticket-toast");
   toast.textContent = text;
@@ -1506,7 +1538,6 @@ function finishSession(session) {
   session.done = true;
   savePlayer();
   confetti(60);
-  ticketToastText(`Study session done!`);
   award(SESSION_TICKETS, "for finishing a study session", "session");
   renderReminders();
   renderTests();
@@ -3383,6 +3414,8 @@ const source = $("source");
 source.addEventListener("input", () => { $("char-count").textContent = `${source.value.length} / 8000`; });
 
 const ai = { limit: 5, left: 5, files: [] };
+// The AI limit follows this device, not the account, so signing in and out doesn't reset it.
+const DEVICE_ID = safeGet("cram-device") || (() => { const id = newPlayerId(); safeSet("cram-device", id); return id; })();
 function renderAiLimit() {
   $("ai-left").textContent = `${ai.left} of ${ai.limit}`;
   const dots = $("ai-limit-dots");
@@ -3404,7 +3437,7 @@ function setAiLimit(data) {
 }
 async function loadAiLimit() {
   try {
-    const res = await fetch(`${API}/api/generate?device=${encodeURIComponent(player.id)}`);
+    const res = await fetch(`${API}/api/generate?device=${encodeURIComponent(DEVICE_ID)}`);
     if (res.ok) setAiLimit(await res.json());
   } catch { /* offline: keep the last count */ }
 }
@@ -3604,7 +3637,7 @@ $("make-form").addEventListener("submit", async (e) => {
     const res = await fetch(API + "/api/generate", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text, device: player.id, files: ai.files.map((f) => ({ type: f.type, data: f.data, name: f.name })) }),
+      body: JSON.stringify({ text, device: DEVICE_ID, files: ai.files.map((f) => ({ type: f.type, data: f.data, name: f.name })) }),
     });
     const data = await res.json().catch(() => ({}));
     setAiLimit(data);
