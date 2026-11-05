@@ -44,21 +44,17 @@ async function count(device, ip, n) {
 
 export function buildPrompt(text, fileCount = 0) {
   const source = fileCount
-    ? `The student attached ${fileCount === 1 ? "a file" : `${fileCount} files`} (class notes, a handout, slides or photos of notes)${text ? " and added the text below" : ""}.
+    ? `The student attached ${fileCount === 1 ? "a file" : `${fileCount} files`} (class notes, a lab report, a handout, slides or photos of notes)${text ? " and added the text below" : ""}.
 Create a study set from it. Use only facts from the files${text ? " and text" : ""}. If a photo is hard to read, use what you can read.`
     : `The student gave you either a topic or their own notes.
 Create a study set from it. If it is notes, use only facts from the notes.
 If it is a short topic, use accurate, well-established facts at a high-school level.`;
   return `You are a study coach. ${source}
 
-Reply with ONLY a JSON object, no other text, in exactly this shape:
-{
-  "title": "short title for the set",
-  "cards": [{"front": "term or question", "back": "short answer, under 20 words"}],
-  "quiz": [{"question": "...", "options": ["A", "B", "C", "D"], "answer": 0, "explanation": "one sentence"}]
-}
-Rules: 10 cards, 6 quiz questions, exactly 4 options each, "answer" is the index (0-3)
-of the correct option, wrong options must be plausible. Card fronts must be unique.
+Save it with the study_set tool.
+Rules: exactly 10 cards and 6 quiz questions. Card backs are short (under 20 words).
+Each quiz question has exactly 4 options, "answer" is the index (0-3) of the correct one,
+and the wrong options must be plausible. Card fronts must be unique.
 ${text ? `
 Student input:
 """
@@ -92,11 +88,50 @@ export function fileBlocks(files) {
 
 export class UserError extends Error {}
 
+// Claude fills in this form, so the reply always comes back as valid, structured data.
+export const STUDY_SET_TOOL = {
+  name: "study_set",
+  description: "Save the finished study set.",
+  input_schema: {
+    type: "object",
+    properties: {
+      title: { type: "string", description: "Short title for the set" },
+      cards: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { front: { type: "string" }, back: { type: "string" } },
+          required: ["front", "back"],
+        },
+      },
+      quiz: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            question: { type: "string" },
+            options: { type: "array", items: { type: "string" } },
+            answer: { type: "integer", description: "Index (0-3) of the correct option" },
+            explanation: { type: "string" },
+          },
+          required: ["question", "options", "answer", "explanation"],
+        },
+      },
+    },
+    required: ["title", "cards", "quiz"],
+  },
+};
+
+// Accepts the tool's data (an object) or, as a fallback, text containing JSON.
 export function parseStudySet(raw) {
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error("No JSON in reply");
-  const data = JSON.parse(raw.slice(start, end + 1));
+  let data = raw;
+  if (typeof raw === "string") {
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start === -1 || end === -1) throw new Error("No JSON in reply");
+    data = JSON.parse(raw.slice(start, end + 1));
+  }
+  if (!data || typeof data !== "object") throw new Error("Empty reply");
   const cards = (data.cards || [])
     .filter((c) => c && c.front && c.back)
     .map((c) => ({ front: String(c.front), back: String(c.back) }));
@@ -168,19 +203,34 @@ export default async function handler(req, res) {
         }
       }
     }
-    const response = await fetch(`${API}/v1/messages`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ model: MODEL, max_tokens: 3000, messages }),
-    });
-    if (!response.ok) {
-      console.error("Anthropic API error", response.status, await response.text());
-      await count(device, ip, -1);
-      return res.status(502).json({ error: "The AI service had a problem. Try again in a moment. (This one didn't count toward your limit.)" });
+    // Ask for the set; if the reply is unusable, try once more before giving up.
+    let set, data;
+    for (let attempt = 1; attempt <= 2 && !set; attempt++) {
+      const response = await fetch(`${API}/v1/messages`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: MODEL, max_tokens: 4000, messages,
+          tools: [STUDY_SET_TOOL], tool_choice: { type: "tool", name: "study_set" },
+        }),
+      });
+      if (!response.ok) {
+        console.error("Anthropic API error", response.status, await response.text());
+        if (attempt === 2 || response.status < 500) {
+          await count(device, ip, -1);
+          return res.status(502).json({ error: "The AI service had a problem. Try again in a moment. (This one didn't count toward your limit.)" });
+        }
+        continue;
+      }
+      data = await response.json();
+      try {
+        const tool = (data.content || []).find((b) => b.type === "tool_use" && b.name === "study_set");
+        set = parseStudySet(tool ? tool.input : (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join(""));
+      } catch (err) {
+        console.error(`Attempt ${attempt}: unusable reply (stop: ${data.stop_reason})`, err.message);
+      }
     }
-    const data = await response.json();
-    const raw = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-    const set = parseStudySet(raw);
+    if (!set) throw new Error("No usable study set after 2 tries");
     console.log("AI set", { input: data.usage?.input_tokens, output: data.usage?.output_tokens, files: blocks.length });
     return res.status(200).json({ ...set, limit: u.limit, used: u.used + 1, left: Math.max(0, u.left - 1), usage: data.usage ? { input: data.usage.input_tokens, output: data.usage.output_tokens } : undefined });
   } catch (err) {
