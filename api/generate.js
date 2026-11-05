@@ -74,6 +74,13 @@ export function fileBlocks(files) {
   return files.map((f) => {
     const data = String(f?.data || "");
     const type = String(f?.type || "");
+    // Word documents arrive as their text (read on the student's device); the rest as base64.
+    if (type === "text/plain") {
+      bytes += Buffer.byteLength(data);
+      if (bytes > MAX_UPLOAD_BYTES) throw new UserError("Those files are too big. Keep them under 3 MB together, or upload one chapter at a time.");
+      if (!data.trim()) throw new UserError("One of the files doesn't have any text in it.");
+      return { type: "document", source: { type: "text", media_type: "text/plain", data }, title: String(f?.name || "Document").slice(0, 120) };
+    }
     bytes += Math.floor((data.length * 3) / 4);
     if (bytes > MAX_UPLOAD_BYTES) throw new UserError("Those files are too big. Keep them under 3 MB together, or upload one chapter at a time.");
     if (!/^[A-Za-z0-9+/=]+$/.test(data)) throw new UserError("One of the files couldn't be read. Try attaching it again.");

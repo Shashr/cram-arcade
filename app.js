@@ -3486,22 +3486,19 @@ $("file-input").addEventListener("change", async (e) => {
   for (const file of [...e.target.files]) {
     const name = file.name || "file";
     try {
+      if (ai.files.length >= 4) throw new Error("toomany");
+      let kind, type, buf, data;
       if (/\.docx$/i.test(name) || file.type.includes("wordprocessingml")) {
-        const text = (await docxText(file)).trim();
-        if (!text) throw new Error("empty");
-        const room = 8000 - source.value.length - 2;
-        if (room < 50) throw new Error("full");
-        source.value = (source.value ? source.value + "\n\n" : "") + text.slice(0, room);
-        source.dispatchEvent(new Event("input"));
-        status.textContent = text.length > room
-          ? `Added the first part of ${name} to the box (the box holds 8000 characters).`
-          : `Added the text from ${name} to the box.`;
-        continue;
+        // Read the Word file here and send its full text along as a document (no box limit).
+        data = (await docxText(file)).trim();
+        if (!data) throw new Error("empty");
+        kind = "Word"; type = "text/plain";
+        buf = new TextEncoder().encode(data);
       }
       if (/\.doc$/i.test(name)) throw new Error("olddoc");
-      if (ai.files.length >= 4) throw new Error("toomany");
-      let kind, type, buf;
-      if (file.type === "application/pdf" || /\.pdf$/i.test(name)) {
+      if (type) {
+        // Word document: already read above
+      } else if (file.type === "application/pdf" || /\.pdf$/i.test(name)) {
         kind = "PDF"; type = "application/pdf"; buf = await file.arrayBuffer();
       } else if (file.type.startsWith("image/")) {
         kind = "Photo"; type = "image/jpeg"; buf = await shrinkImage(file);
@@ -3510,7 +3507,7 @@ $("file-input").addEventListener("change", async (e) => {
       }
       const used = ai.files.reduce((n, f) => n + f.size, 0);
       if (used + buf.byteLength > MAX_UPLOAD) throw new Error("big");
-      ai.files.push({ name, kind, type, size: buf.byteLength, data: toBase64(buf) });
+      ai.files.push({ name, kind, type, size: buf.byteLength, data: data ?? toBase64(buf) });
       status.textContent = "";
     } catch (err) {
       status.classList.add("error");
@@ -3519,7 +3516,6 @@ $("file-input").addEventListener("change", async (e) => {
         toomany: "You can attach up to 4 files at a time.",
         olddoc: `${name} is an old Word file (.doc). Open it in Word or Google Docs and save it as .docx or PDF.`,
         type: `${name} isn't a PDF, Word document or photo.`,
-        full: "The text box is full. Make a set from this first, then add more.",
         empty: `${name} doesn't have any text in it.`,
       }[err.message] || `Couldn't read ${name}. Try saving it as a PDF.`;
     }
@@ -3608,7 +3604,7 @@ $("make-form").addEventListener("submit", async (e) => {
     const res = await fetch(API + "/api/generate", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text, device: player.id, files: ai.files.map((f) => ({ type: f.type, data: f.data })) }),
+      body: JSON.stringify({ text, device: player.id, files: ai.files.map((f) => ({ type: f.type, data: f.data, name: f.name })) }),
     });
     const data = await res.json().catch(() => ({}));
     setAiLimit(data);
