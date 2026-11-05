@@ -1470,15 +1470,64 @@ function studyFor(session) {
   }
 }
 
+/* A session only counts once you've actually studied that day: SESSION_GOAL answers
+   across flashcards, quiz, match or boss battle. Taps less than 1.5 seconds apart don't
+   count, so flipping through cards without reading doesn't finish a session. Each finished
+   session uses up its own SESSION_GOAL answers, so two sessions on one day need double. */
+const SESSION_GOAL = 15;
+const STUDY_GAP_MS = 1500;
+function studyToday() {
+  const today = todayISO();
+  if (player.studyDay?.date !== today) player.studyDay = { date: today, count: 0, used: 0, last: 0 };
+  return player.studyDay;
+}
+function sessionProgress() {
+  const day = studyToday();
+  return Math.min(SESSION_GOAL, day.count - day.used);
+}
+function logStudy() {
+  const day = studyToday();
+  const now = Date.now();
+  if (now - day.last < STUDY_GAP_MS) return;
+  day.last = now;
+  day.count++;
+  const next = (player.sessions || []).filter((x) => x.date === day.date && !x.done).sort((a, b) => sessionTime(a) - sessionTime(b))[0];
+  if (next && day.count - day.used >= SESSION_GOAL) {
+    day.used += SESSION_GOAL;
+    finishSession(next);
+  } else {
+    savePlayer();
+    if (next) renderReminders();
+  }
+}
+
 function finishSession(session) {
   if (session.done || daysUntil(session.date) !== 0) return;
   session.done = true;
   savePlayer();
   confetti(60);
+  ticketToastText(`Study session done!`);
   award(SESSION_TICKETS, "for finishing a study session", "session");
   renderReminders();
   renderTests();
   if ($("calendar").open) renderCalendar();
+}
+
+// "8 / 15 answers" bar shown wherever a session would have had a Done button.
+function sessionMeter() {
+  const got = sessionProgress();
+  const wrap = el("div", "session-meter");
+  wrap.setAttribute("role", "progressbar");
+  wrap.setAttribute("aria-valuemin", "0");
+  wrap.setAttribute("aria-valuemax", String(SESSION_GOAL));
+  wrap.setAttribute("aria-valuenow", String(got));
+  wrap.setAttribute("aria-label", "Study session progress");
+  const bar = el("span", "session-bar");
+  const fill = el("span", "session-fill");
+  fill.style.width = `${(got / SESSION_GOAL) * 100}%`;
+  bar.append(fill);
+  wrap.append(bar, el("span", "session-count", `${got} / ${SESSION_GOAL} answers for +${SESSION_TICKETS} tickets`));
+  return wrap;
 }
 
 /* ----- Reminder banner at the top of the page ----- */
@@ -1509,10 +1558,8 @@ function renderReminders() {
       const go = el("button", "btn btn-primary", "Study now");
       go.type = "button";
       go.addEventListener("click", () => studyFor(s));
-      const done = el("button", "btn btn-good", `Done (+${SESSION_TICKETS})`);
-      done.type = "button";
-      done.addEventListener("click", () => finishSession(s));
-      actions.append(go, done);
+      actions.append(go);
+      text.append(" Answer cards or questions in any game to finish it.");
     } else {
       const t = item.test;
       const days = daysUntil(t.date);
@@ -1538,6 +1585,7 @@ function renderReminders() {
       renderReminders();
     });
     card.append(text, actions, hide);
+    if (item.kind === "session") actions.before(sessionMeter());
     box.append(card);
   }
 }
@@ -1807,10 +1855,7 @@ function renderCalDay() {
     row.append(el("span", "cal-item-kind", timeLabel(s)), el("strong", "", sessionTitle(s)));
     if (s.done) row.append(el("span", "done-tag", "Done"));
     else if (days === 0) {
-      const done = el("button", "btn btn-good small-btn", `Done (+${SESSION_TICKETS})`);
-      done.type = "button";
-      done.addEventListener("click", () => finishSession(s));
-      row.append(done);
+      row.append(el("span", "done-tag pending-tag", `${sessionProgress()} / ${SESSION_GOAL}`));
     }
     const del = el("button", "test-remove", "×");
     del.type = "button";
@@ -2759,6 +2804,7 @@ function flipCard() {
   fx.play("flip");
 }
 function markCard(known) {
+  logStudy();
   const id = state.order[state.index];
   (known ? state.learning : state.known).delete(id);
   (known ? state.known : state.learning).add(id);
@@ -2831,6 +2877,7 @@ function renderQuestion() {
 }
 
 function answer(choice, card) {
+  logStudy();
   const q = state.set.quiz[quiz.i];
   const buttons = card.querySelectorAll(".option");
   buttons.forEach((b, n) => {
@@ -2933,6 +2980,7 @@ function pickTile(tile) {
     first.classList.add("gone");
     tile.classList.add("gone");
     fx.play("pair");
+    logStudy();
     if (--match.left === 0) finishMatch();
   } else {
     match.penalty += 2;
@@ -3196,6 +3244,7 @@ function bossAnswer(choice) {
   if (!boss.active || boss.locked) return;
   if (choice >= 0 && $("boss-options").children[choice]?.disabled) return; // removed by 50/50
   boss.locked = true;
+  if (choice >= 0) logStudy(); // a timeout isn't studying
   cancelAnimationFrame(boss.raf);
   renderPowers();
   const q = boss.q;
@@ -3327,44 +3376,256 @@ document.addEventListener("keydown", (e) => {
   if (e.key.length === 1 && n >= 0) bossAnswer(n);
 });
 
-/* ---------- Making a set with AI ---------- */
+/* ---------- Making a set with AI ----------
+   Notes, a topic, files (PDF, Word, photos) or voice. Each person gets a few AI sets a
+   day; the counter above the box always shows how many are left. */
 const source = $("source");
 source.addEventListener("input", () => { $("char-count").textContent = `${source.value.length} / 8000`; });
 
+const ai = { limit: 5, left: 5, files: [] };
+function renderAiLimit() {
+  $("ai-left").textContent = `${ai.left} of ${ai.limit}`;
+  const dots = $("ai-limit-dots");
+  dots.innerHTML = "";
+  for (let i = 0; i < ai.limit; i++) dots.append(el("span", i < ai.left ? "on" : ""));
+  const out = ai.left <= 0;
+  $("ai-limit").classList.toggle("empty", out);
+  $("ai-limit-note").textContent = out
+    ? `You've used today's ${ai.limit}. More at midnight. You can still type your own set (no limit).`
+    : `Everyone gets ${ai.limit} a day, and they refill at midnight. "Type my own" has no limit.`;
+  $("make-btn").disabled = out;
+  $("make-btn").textContent = out ? "No AI sets left today" : "Make my study set";
+}
+function setAiLimit(data) {
+  if (!data || !Number.isFinite(data.left)) return;
+  ai.limit = data.limit || ai.limit;
+  ai.left = data.left;
+  renderAiLimit();
+}
+async function loadAiLimit() {
+  try {
+    const res = await fetch(`${API}/api/generate?device=${encodeURIComponent(player.id)}`);
+    if (res.ok) setAiLimit(await res.json());
+  } catch { /* offline: keep the last count */ }
+}
+renderAiLimit();
+loadAiLimit();
+document.addEventListener("visibilitychange", () => { if (!document.hidden) loadAiLimit(); });
+
+/* ----- Attached files ----- */
+const MAX_UPLOAD = 3_000_000;
+function fileSize(n) { return n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`; }
+function toBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+// Photos are shrunk on the phone first (smaller upload, same readability for the AI).
+async function shrinkImage(file) {
+  const img = await createImageBitmap(file);
+  const scale = Math.min(1, 1568 / Math.max(img.width, img.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.85));
+  return blob.arrayBuffer();
+}
+
+// A .docx file is a zip; the words are in word/document.xml. Read it right here.
+async function docxText(file) {
+  const buf = await file.arrayBuffer();
+  const view = new DataView(buf);
+  let end = buf.byteLength - 22;
+  while (end >= 0 && view.getUint32(end, true) !== 0x06054b50) end--;
+  if (end < 0) throw new Error("bad zip");
+  let at = view.getUint32(end + 16, true);
+  const entries = view.getUint16(end + 10, true);
+  const decoder = new TextDecoder();
+  for (let i = 0; i < entries; i++) {
+    const method = view.getUint16(at + 10, true);
+    const size = view.getUint32(at + 20, true);
+    const nameLen = view.getUint16(at + 28, true);
+    const skip = view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+    const local = view.getUint32(at + 42, true);
+    const name = decoder.decode(new Uint8Array(buf, at + 46, nameLen));
+    if (name === "word/document.xml") {
+      const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+      let data = new Uint8Array(buf, start, size);
+      if (method === 8) data = new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+      const xml = new DOMParser().parseFromString(decoder.decode(data), "application/xml");
+      const paras = [...xml.getElementsByTagNameNS("*", "p")].map((p) =>
+        [...p.getElementsByTagNameNS("*", "*")].map((n) => (n.localName === "t" ? n.textContent : n.localName === "tab" ? " " : n.localName === "br" ? "\n" : "")).join(""));
+      return paras.filter((t) => t.trim()).join("\n");
+    }
+    at += 46 + nameLen + skip;
+  }
+  throw new Error("no document.xml");
+}
+
+function renderFiles() {
+  const list = $("file-list");
+  list.innerHTML = "";
+  for (const f of ai.files) {
+    const li = el("li", "file-chip");
+    li.append(el("span", "file-kind", f.kind), el("span", "file-name", f.name), el("span", "muted small", fileSize(f.size)));
+    const x = el("button", "file-remove", "×");
+    x.type = "button";
+    x.setAttribute("aria-label", `Remove ${f.name}`);
+    x.addEventListener("click", () => { ai.files = ai.files.filter((g) => g !== f); renderFiles(); });
+    li.append(x);
+    list.append(li);
+  }
+}
+
+$("file-input").addEventListener("change", async (e) => {
+  const status = $("status");
+  status.className = "status";
+  for (const file of [...e.target.files]) {
+    const name = file.name || "file";
+    try {
+      if (/\.docx$/i.test(name) || file.type.includes("wordprocessingml")) {
+        const text = (await docxText(file)).trim();
+        if (!text) throw new Error("empty");
+        const room = 8000 - source.value.length - 2;
+        if (room < 50) throw new Error("full");
+        source.value = (source.value ? source.value + "\n\n" : "") + text.slice(0, room);
+        source.dispatchEvent(new Event("input"));
+        status.textContent = text.length > room
+          ? `Added the first part of ${name} to the box (the box holds 8000 characters).`
+          : `Added the text from ${name} to the box.`;
+        continue;
+      }
+      if (/\.doc$/i.test(name)) throw new Error("olddoc");
+      if (ai.files.length >= 4) throw new Error("toomany");
+      let kind, type, buf;
+      if (file.type === "application/pdf" || /\.pdf$/i.test(name)) {
+        kind = "PDF"; type = "application/pdf"; buf = await file.arrayBuffer();
+      } else if (file.type.startsWith("image/")) {
+        kind = "Photo"; type = "image/jpeg"; buf = await shrinkImage(file);
+      } else {
+        throw new Error("type");
+      }
+      const used = ai.files.reduce((n, f) => n + f.size, 0);
+      if (used + buf.byteLength > MAX_UPLOAD) throw new Error("big");
+      ai.files.push({ name, kind, type, size: buf.byteLength, data: toBase64(buf) });
+      status.textContent = "";
+    } catch (err) {
+      status.classList.add("error");
+      status.textContent = {
+        big: "That's too big. Files can be 3 MB together. Try one chapter, or fewer pages.",
+        toomany: "You can attach up to 4 files at a time.",
+        olddoc: `${name} is an old Word file (.doc). Open it in Word or Google Docs and save it as .docx or PDF.`,
+        type: `${name} isn't a PDF, Word document or photo.`,
+        full: "The text box is full. Make a set from this first, then add more.",
+        empty: `${name} doesn't have any text in it.`,
+      }[err.message] || `Couldn't read ${name}. Try saving it as a PDF.`;
+    }
+  }
+  e.target.value = "";
+  renderFiles();
+});
+
+/* ----- Voice: speak your notes into the box ----- */
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+const voice = { rec: null, base: "" };
+function setVoiceUi(on) {
+  $("voice-btn").setAttribute("aria-pressed", String(on));
+  $("voice-label").textContent = on ? "Stop" : "Speak";
+}
+if (NATIVE && PHONE.SpeechRecognition) {
+  $("voice-btn").hidden = false;
+  $("voice-btn").addEventListener("click", async () => {
+    const SR = PHONE.SpeechRecognition;
+    const status = $("status");
+    try {
+      const { available } = await SR.available();
+      if (!available) throw new Error("This phone doesn't have speech recognition turned on.");
+      const perm = await SR.requestPermissions();
+      if (perm.speechRecognition && perm.speechRecognition !== "granted") throw new Error("Allow the microphone to use voice.");
+      const { matches } = await SR.start({ language: navigator.language || "en-US", maxResults: 1, prompt: "Say your notes", partialResults: false, popup: true });
+      const said = (matches && matches[0]) || "";
+      if (said) {
+        source.value = (source.value ? source.value.trimEnd() + " " : "") + said;
+        source.dispatchEvent(new Event("input"));
+      }
+    } catch (err) {
+      status.className = "status error";
+      status.textContent = err.message || "Voice didn't work. Try again.";
+    }
+  });
+} else if (SpeechRec) {
+  $("voice-btn").hidden = false;
+  $("voice-btn").addEventListener("click", () => {
+    if (voice.rec) { voice.rec.stop(); return; }
+    const rec = new SpeechRec();
+    rec.lang = navigator.language || "en-US";
+    rec.continuous = true;
+    rec.interimResults = true;
+    voice.base = source.value ? source.value.trimEnd() + " " : "";
+    rec.onresult = (ev) => {
+      let finalText = "", interim = "";
+      for (const r of ev.results) (r.isFinal ? (finalText += r[0].transcript) : (interim += r[0].transcript));
+      source.value = (voice.base + finalText + interim).slice(0, 8000);
+      source.dispatchEvent(new Event("input"));
+    };
+    rec.onerror = (ev) => {
+      if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+        $("status").className = "status error";
+        $("status").textContent = "Allow the microphone in your browser to use voice.";
+      }
+    };
+    rec.onend = () => { voice.rec = null; setVoiceUi(false); };
+    voice.rec = rec;
+    rec.start();
+    setVoiceUi(true);
+    $("status").className = "status";
+    $("status").textContent = "Listening… say your notes, then press Stop.";
+  });
+}
+
 $("make-form").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (voice.rec) voice.rec.stop();
   const text = source.value.trim();
   const status = $("status");
   status.className = "status";
-  if (!text) {
+  if (!text && !ai.files.length) {
     status.classList.add("error");
-    status.textContent = "Type a topic or paste some notes first.";
+    status.textContent = "Type a topic, paste some notes or attach a file first.";
     return;
   }
+  if (ai.left <= 0) return;
   const btn = $("make-btn");
   btn.disabled = true;
   btn.textContent = "Making your set…";
-  status.textContent = "Claude is writing your flashcards and quiz. This takes about 10 seconds.";
+  status.textContent = ai.files.length
+    ? "Claude is reading your file and writing your flashcards and quiz. This takes about 20 seconds."
+    : "Claude is writing your flashcards and quiz. This takes about 10 seconds.";
   try {
     const res = await fetch(API + "/api/generate", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, device: player.id, files: ai.files.map((f) => ({ type: f.type, data: f.data })) }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "Something went wrong. Try again.");
+    setAiLimit(data);
+    if (!res.ok) throw new Error(data.error || (res.status === 413 ? "Those files are too big. Try fewer pages." : "Something went wrong. Try again."));
     saveSet(data, "ai");
     linkNewSet(data.title);
     loadSet(data, "ai");
     showView("cards");
+    ai.files = [];
+    renderFiles();
     status.textContent = `Ready: ${data.cards.length} flashcards and ${data.quiz.length} quiz questions.`;
     document.querySelector(".set").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (err) {
     status.classList.add("error");
     status.textContent = err.message === "Failed to fetch" ? "Couldn't reach the server. Check your connection." : err.message;
   } finally {
-    btn.disabled = false;
-    btn.textContent = "Make my study set";
+    renderAiLimit();
   }
 });
 

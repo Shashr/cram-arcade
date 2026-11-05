@@ -43,7 +43,7 @@ jobs:
           java-version: 21
 
       - name: Install
-        run: npm install --no-audit --no-fund
+        run: npm install --no-audit --no-fund --legacy-peer-deps
 
       - name: Create the Android project
         run: npm run android:setup

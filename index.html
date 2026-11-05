@@ -171,8 +171,25 @@
       </div>
 
       <form id="make-form" class="maker">
-        <label for="source" class="label">Paste your notes or type a topic</label>
+        <div class="ai-limit" id="ai-limit" role="status">
+          <span class="ai-limit-dots" id="ai-limit-dots" aria-hidden="true"></span>
+          <span><strong id="ai-left">5 of 5</strong> AI study sets left today</span>
+          <span class="muted small" id="ai-limit-note">Everyone gets 5 a day, and they refill at midnight. "Type my own" has no limit.</span>
+        </div>
+        <label for="source" class="label">Paste your notes, type a topic, or attach a file</label>
         <textarea id="source" rows="4" maxlength="8000" placeholder="Ohm's law and series vs parallel circuits, or paste a page of class notes"></textarea>
+        <div class="input-tools">
+          <label class="btn btn-quiet tool-btn" for="file-input">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5l-8 8a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.7 1.7 0 0 1-2.4-2.4L15 7.2"/></svg>
+            Attach PDF, Word or photo
+          </label>
+          <input id="file-input" class="visually-hidden" type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*" multiple>
+          <button id="voice-btn" class="btn btn-quiet tool-btn" type="button" aria-pressed="false" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+            <span id="voice-label">Speak</span>
+          </button>
+        </div>
+        <ul id="file-list" class="file-list" aria-label="Attached files"></ul>
         <div class="maker-row">
           <span id="char-count" class="muted small">0 / 8000</span>
           <button id="make-btn" class="btn btn-primary" type="submit">Make my study set</button>

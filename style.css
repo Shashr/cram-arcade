@@ -482,6 +482,11 @@ main { display: grid; gap: 28px; padding-block: 20px 40px; }
 .cal-item .test-remove { top: 50%; transform: translateY(-50%); }
 .cal-item-kind { font-size: 0.8rem; font-weight: 700; color: var(--muted); min-width: 64px; }
 .done-tag { font-size: 0.8rem; font-weight: 700; color: var(--good); }
+.pending-tag { color: var(--muted); font-variant-numeric: tabular-nums; }
+.session-meter { display: grid; gap: 4px; flex: 1 1 100%; }
+.session-bar { display: block; height: 12px; border-radius: 999px; background: rgba(28, 18, 64, 0.15); border: 2px solid #1c1240; overflow: hidden; }
+.session-fill { display: block; height: 100%; background: var(--green); transition: width 0.3s ease; }
+.session-count { font-size: 0.85rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .small-btn { padding: 4px 10px; font-size: 0.85rem; }
 .cal-forms { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 640px) { .cal-forms { grid-template-columns: 1fr; } }
@@ -1027,3 +1032,35 @@ textarea:hover, .text-input:hover { border-color: var(--muted); }
 /* Get the Android app */
 .getapp-download { display: block; text-align: center; text-decoration: none; margin: 14px 0 6px; }
 .getapp-steps { margin: 4px 0 12px; padding-left: 1.3em; display: grid; gap: 6px; }
+
+/* AI sets left today: always visible above the box */
+.ai-limit {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+  padding: 10px 12px; border-radius: 12px; background: var(--panel-2);
+  border: 2px solid var(--line);
+}
+.ai-limit strong { font-family: var(--sign); font-weight: 400; font-variant-numeric: tabular-nums; }
+.ai-limit .muted.small { flex-basis: 100%; }
+.ai-limit-dots { display: inline-flex; gap: 4px; }
+.ai-limit-dots span { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); background: transparent; }
+.ai-limit-dots span.on { background: var(--yellow); }
+.ai-limit.empty { background: var(--bad-bg); border-color: var(--bad); }
+.ai-limit.empty .muted.small { color: var(--text); font-weight: 700; }
+
+/* Attach and voice */
+.input-tools { display: flex; flex-wrap: wrap; gap: 8px; }
+.tool-btn { display: inline-flex; align-items: center; gap: 6px; font-size: 0.92rem; padding: 7px 12px; }
+.tool-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tool-btn[aria-pressed="true"] { background: var(--red); color: #ffffff; border-color: var(--line); animation: pulse 1.6s ease-in-out infinite; }
+.input-tools:has(#file-input:focus-visible) label[for="file-input"] { outline: 3px solid var(--focus); outline-offset: 2px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.file-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.file-list:empty { display: none; }
+.file-chip {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  padding: 4px 4px 4px 6px; border-radius: 10px; background: var(--panel-2); border: 2px solid var(--line);
+}
+.file-kind { font-size: 0.75rem; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: var(--blue); color: #1c1240; }
+.file-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.file-remove { font: inherit; font-size: 1.1rem; line-height: 1; width: 28px; height: 28px; border: 0; border-radius: 50%; background: none; color: var(--muted); cursor: pointer; }
+.file-remove:hover { color: var(--bad); background: var(--panel); }
