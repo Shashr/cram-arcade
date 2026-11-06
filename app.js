@@ -699,6 +699,8 @@ async function renderCrew(reload = false) {
 const SESSION_KEY = "cram-session";
 const account = { config: null, profile: null, syncedAt: 0, syncing: false, error: "" };
 try { account.profile = JSON.parse(safeGet("cram-profile") || "null"); } catch { /* ignore */ }
+// A name without a sign-in token isn't really signed in: don't show it as if it were.
+if (account.profile && !safeGet(SESSION_KEY)) { account.profile = null; safeSet("cram-profile", "null"); }
 
 async function getConfig() {
   if (account.config) return account.config;
@@ -3048,10 +3050,17 @@ function finishMatch() {
 $("match-restart").addEventListener("click", newMatchRound);
 
 /* ---------- Boss battle ----------
-   The study set becomes a boss. Right answers deal damage (more if you're fast or on a
-   combo), wrong answers or running out of time cost a heart. Missed questions come back
-   a few turns later, so the fight doubles as practice on what you don't know. */
-const BOSS_SVG = `
+   The study set becomes a boss, and every fight picks one of four bosses at random.
+   Each is beaten a different way:
+   - The Final Exam: right answers hit, fast ones crit; it gets enraged at half health.
+   - The Deadline: one clock for the whole fight. Right answers charge energy and you
+     choose the attack: cheap jabs now, or save up for a Brain Blast.
+   - The Ironclad Proctor: a 3-layer shield. Three right in a row breaks it, then it takes
+     double damage for 3 hits. One wrong answer and the shield is back.
+   - The Homework Hydra: each right answer chops a head off, each wrong one grows a new one.
+   Missed questions come back a few turns later, so every fight is also practice. */
+const BOSS_ART = {
+  exam: `
 <svg viewBox="0 0 120 140" aria-hidden="true">
   <path class="paper" d="M14 8 H86 L106 28 V128 H14 Z"/>
   <path class="ink-line" d="M86 8 V28 H106"/>
@@ -3063,14 +3072,102 @@ const BOSS_SVG = `
   <path class="mouth" d="M34 84 H86 L79 100 H41 Z"/>
   <path class="teeth" d="M43 84 L47 92 L51 84 Z M58 84 L62 92 L66 84 Z M72 84 L76 92 L80 84 Z"/>
   <path class="rule" d="M26 112 H94 M26 120 H70"/>
-</svg>`;
+</svg>`,
+  clock: `
+<svg viewBox="0 0 120 140" aria-hidden="true">
+  <circle class="bell" cx="26" cy="24" r="14"/><circle class="bell" cx="94" cy="24" r="14"/>
+  <path class="ink-line" d="M60 6 V16 M48 6 H72"/>
+  <circle class="paper" cx="60" cy="74" r="50"/>
+  <path class="rule" d="M60 30 V38 M60 110 V118 M16 74 H24 M96 74 H104"/>
+  <path class="brow" d="M36 54 L54 62 M84 54 L66 62"/>
+  <circle class="eye" cx="46" cy="70" r="6"/><circle class="eye" cx="74" cy="70" r="6"/>
+  <path class="hand" d="M60 74 L60 46 M60 74 L80 86"/>
+  <path class="mouth" d="M42 98 Q60 88 78 98 L74 104 Q60 96 46 104 Z"/>
+  <path class="ink-line" d="M28 122 L20 134 M92 122 L100 134"/>
+</svg>`,
+  shield: `
+<svg viewBox="0 0 120 140" aria-hidden="true">
+  <path class="plume" d="M60 4 C76 8 84 18 82 30 C74 22 66 20 60 22 Z"/>
+  <path class="metal" d="M24 50 C24 24 96 24 96 50 V96 C96 110 24 110 24 96 Z"/>
+  <rect class="visor" x="34" y="56" width="52" height="14" rx="6"/>
+  <circle class="glow" cx="48" cy="63" r="4"/><circle class="glow" cx="72" cy="63" r="4"/>
+  <path class="rule" d="M60 30 V54 M36 82 H84 M40 92 H80"/>
+  <path class="shield-art" d="M70 84 H112 V108 C112 124 92 134 91 136 C90 134 70 124 70 108 Z"/>
+  <text class="grade" x="91" y="112" text-anchor="middle">A+</text>
+</svg>`,
+  hydra: `
+<svg viewBox="0 0 120 140" aria-hidden="true">
+  <path class="scales" d="M30 136 C26 112 34 96 60 96 C86 96 94 112 90 136 Z"/>
+  <path class="neck" d="M44 100 C30 80 18 66 22 44"/><path class="neck" d="M60 98 C60 76 60 60 60 34"/><path class="neck" d="M76 100 C90 80 102 66 98 44"/>
+  <g class="head"><ellipse class="scales" cx="22" cy="38" rx="15" ry="11"/><circle class="eye" cx="18" cy="35" r="3"/><circle class="eye" cx="27" cy="35" r="3"/><path class="teeth" d="M14 44 L18 48 L22 44 L26 48 L30 44 Z"/></g>
+  <g class="head"><ellipse class="scales" cx="60" cy="26" rx="16" ry="12"/><circle class="eye" cx="55" cy="23" r="3.4"/><circle class="eye" cx="65" cy="23" r="3.4"/><path class="teeth" d="M50 33 L54 37 L58 33 L62 37 L66 33 L70 37 Z"/></g>
+  <g class="head"><ellipse class="scales" cx="98" cy="38" rx="15" ry="11"/><circle class="eye" cx="93" cy="35" r="3"/><circle class="eye" cx="102" cy="35" r="3"/><path class="teeth" d="M90 44 L94 48 L98 44 L102 48 L106 44 Z"/></g>
+  <path class="rule" d="M44 116 H76 M48 126 H72"/>
+</svg>`,
+};
 
 const BOSS = { baseDamage: 100, hpPerQuestion: 140, maxQuestionsForHp: 12, hearts: 3,
                calmMs: 10000, enragedMs: 7000, critAbove: 0.65 };
-const boss = { active: false, raf: 0, wait: 0 };
+// The Deadline's attacks: saving energy for bigger attacks does more damage per point.
+const ATTACKS = [
+  { id: "jab", name: "Jab", cost: 1, dmg: 60, key: "Q" },
+  { id: "slam", name: "Slam", cost: 3, dmg: 220, key: "W" },
+  { id: "blast", name: "Brain Blast", cost: 5, dmg: 450, key: "E" },
+];
+const CLOCK = { ms: 90_000, wrongPenaltyMs: 5000, quickMs: 4000, maxEnergy: 8, hpPerQuestion: 80 };
+const SHIELD = { layers: 3, staggerHits: 3, damage: 2.2 };
 
-function bossKey() { return "cram-boss:" + state.set.title; }
-function bossName() { return `The ${state.set.title} Final Exam`; }
+const BOSS_TYPES = {
+  exam: {
+    name: () => `The ${state.set.title} Final Exam`,
+    tagline: "Hit hard and fast before it gets angry.",
+    rules: [
+      "Every right answer hits the boss. Answer fast for a <strong>critical hit</strong>.",
+      "Get answers right in a row to build a <strong>combo</strong> for extra damage.",
+      `A wrong answer or running out of time costs a heart. You have ${BOSS.hearts}.`,
+      "At half health the boss gets <strong>enraged</strong> and the timer speeds up.",
+    ],
+  },
+  clock: {
+    name: () => "The Deadline",
+    tagline: "Beat it before the clock runs out.",
+    rules: [
+      `You have <strong>${CLOCK.ms / 1000} seconds</strong> for the whole fight. No hearts: time is your life.`,
+      `Right answers charge <strong>energy</strong> (2 if you answer in under ${CLOCK.quickMs / 1000} seconds).`,
+      "Spend energy on an attack: <strong>Jab</strong> (1), <strong>Slam</strong> (3) or <strong>Brain Blast</strong> (5). Saving up hits harder.",
+      `A wrong answer takes ${CLOCK.wrongPenaltyMs / 1000} seconds off the clock.`,
+    ],
+  },
+  shield: {
+    name: () => "The Ironclad Proctor",
+    tagline: "Break the shield, then strike.",
+    rules: [
+      `It hides behind a <strong>${SHIELD.layers}-layer shield</strong>. Each right answer cracks one layer.`,
+      `When the shield breaks, your next ${SHIELD.staggerHits} right answers do <strong>double damage</strong>.`,
+      "A wrong answer puts the whole shield back up <strong>and</strong> costs a heart.",
+      `You have ${BOSS.hearts} hearts. Streaks are everything.`,
+    ],
+  },
+  hydra: {
+    name: () => "The Homework Hydra",
+    tagline: "Chop off every head. Don't let it grow more.",
+    rules: [
+      "Each right answer <strong>chops off a head</strong>. Every 3rd answer in a row chops two.",
+      "Each wrong answer (or running out of time) <strong>grows a new head</strong> and costs a heart.",
+      `Chop off every head to win. You have ${BOSS.hearts} hearts.`,
+    ],
+  },
+};
+const boss = { active: false, raf: 0, wait: 0, type: null, next: null };
+
+function pickBoss(avoid) {
+  const types = Object.keys(BOSS_TYPES).filter((t) => t !== avoid);
+  return types[Math.floor(Math.random() * types.length)];
+}
+function bossKey(type = boss.type || "exam") {
+  return type === "exam" ? "cram-boss:" + state.set.title : `cram-boss:${state.set.title}:${type}`;
+}
+function bossName(type = boss.type || "exam") { return BOSS_TYPES[type].name(); }
 
 // Quiz questions plus a multiple-choice question for every flashcard.
 function bossQuestions() {
@@ -3089,82 +3186,115 @@ function el(tag, className, text) {
 }
 function stopBoss() {
   cancelAnimationFrame(boss.raf);
+  cancelAnimationFrame(boss.clockRaf);
   clearTimeout(boss.wait);
   boss.active = false;
 }
 
-function renderBossIntro() {
+function renderBossIntro(type) {
   stopBoss();
+  boss.next = type || boss.next || pickBoss(safeGet("cram-last-boss"));
+  const t = BOSS_TYPES[boss.next];
   const body = $("boss-body");
-  const best = Number(safeGet(bossKey()));
+  const best = Number(safeGet(bossKey(boss.next)));
   body.innerHTML = `
-    <div class="quiz-card boss-intro">
-      <div class="boss-stage small"><div class="boss-sprite idle">${BOSS_SVG}</div></div>
-      <p class="eyebrow">Boss battle</p>
+    <div class="quiz-card boss-intro boss-${boss.next}">
+      <div class="boss-stage small"><div class="boss-sprite idle">${BOSS_ART[boss.next]}</div></div>
+      <p class="eyebrow">Boss battle: ${state.set.title.length > 40 ? "this set" : "<span class='set-ref'></span>"}</p>
       <h3 class="boss-title"></h3>
-      <ul class="rules">
-        <li>Every right answer hits the boss. Answer fast for a <strong>critical hit</strong>.</li>
-        <li>Get answers right in a row to build a <strong>combo</strong> for extra damage.</li>
-        <li>A wrong answer or running out of time costs a heart. You have ${BOSS.hearts}.</li>
-        <li>At half health the boss gets <strong>enraged</strong> and the timer speeds up.</li>
-      </ul>
-      <p class="muted">${best ? `Your fastest win: ${best.toFixed(1)} seconds.` : "You haven't beaten this boss yet."} On a keyboard, press 1–4 to answer.</p>
+      <p class="boss-tagline"></p>
+      <p class="label">How to beat it</p>
+      <ul class="rules">${t.rules.map((r) => `<li>${r}</li>`).join("")}</ul>
+      <p class="muted">${best ? `Your fastest win against this boss: ${best.toFixed(1)} seconds.` : "You haven't beaten this boss yet."} On a keyboard, press 1–4 to answer${boss.next === "clock" ? " and Q, W, E to attack" : ""}.</p>
     </div>`;
-  body.querySelector(".boss-title").textContent = bossName();
+  const ref = body.querySelector(".set-ref");
+  if (ref) ref.textContent = state.set.title;
+  body.querySelector(".boss-title").textContent = bossName(boss.next);
+  body.querySelector(".boss-tagline").textContent = t.tagline;
+  const row = el("div", "card-controls");
   const start = el("button", "btn btn-primary", "Start the fight");
   start.type = "button";
   start.id = "boss-start";
-  start.addEventListener("click", startBoss);
-  body.firstElementChild.append(start);
+  start.addEventListener("click", () => startBoss(boss.next));
+  const other = el("button", "btn btn-quiet", "Fight a different boss");
+  other.type = "button";
+  other.addEventListener("click", () => { fx.play("flip"); renderBossIntro(pickBoss(boss.next)); });
+  row.append(start, other);
+  body.firstElementChild.append(row);
 }
 
-function startBoss() {
+function startBoss(type = boss.next || "exam") {
   const pool = bossQuestions();
   const body = $("boss-body");
   if (pool.length < 4) {
     body.innerHTML = '<p class="muted">This set is too small for a boss battle.</p>';
     return;
   }
-  const max = Math.min(pool.length, BOSS.maxQuestionsForHp) * BOSS.hpPerQuestion;
+  stopBoss();
+  boss.next = type;
+  safeSet("cram-last-boss", type);
+  const n = Math.min(pool.length, BOSS.maxQuestionsForHp);
+  const hearts = type === "clock" ? 0 : BOSS.hearts;
+  const max = type === "clock" ? n * CLOCK.hpPerQuestion
+    : type === "hydra" ? Math.min(6, Math.max(3, Math.ceil(pool.length / 3)))
+    : n * BOSS.hpPerQuestion;
   Object.assign(boss, {
-    active: true, pool, qi: 0, max, hp: max, hearts: BOSS.hearts, maxHearts: BOSS.hearts, combo: 0, maxCombo: 0,
+    type, active: true, pool, qi: 0, max, hp: max, hearts, maxHearts: hearts, combo: 0, maxCombo: 0,
     right: 0, answered: 0, missed: new Map(), asked: new Set(), start: Date.now(), locked: false, enraged: false,
     heartUsed: false, frozen: false, fiftyUsed: false,
+    // The Deadline
+    energy: 0, clockLeft: CLOCK.ms, clockLast: performance.now(), clockFrozenUntil: 0, attacks: 0,
+    // The Ironclad Proctor
+    shield: SHIELD.layers, stagger: 0,
+    // The Homework Hydra
+    headsMax: max + 3,
   });
   body.innerHTML = `
-    <div class="arena" id="arena">
+    <div class="arena boss-${type}" id="arena">
       <div class="hp-block">
         <div class="hp-label"><strong class="boss-name"></strong><span class="mono" id="boss-hp-text"></span></div>
-        <div class="hp-bar" role="progressbar" aria-label="Boss health" aria-valuemin="0" aria-valuemax="${max}"><span class="hp-chip" id="boss-chip"></span><span class="hp-fill" id="boss-hp"></span></div>
+        <div class="hp-bar" role="progressbar" aria-label="${type === "hydra" ? "Heads left" : "Boss health"}" aria-valuemin="0" aria-valuemax="${max}"><span class="hp-chip" id="boss-chip"></span><span class="hp-fill" id="boss-hp"></span></div>
       </div>
       <div class="boss-stage">
-        <div class="boss-sprite idle entering" id="boss-sprite">${BOSS_SVG}</div>
+        <div class="boss-sprite idle entering" id="boss-sprite">${BOSS_ART[type]}</div>
         <div class="dmg-layer" id="dmg-layer"></div>
-        <p class="phase-banner" id="phase-banner" hidden>Enraged! The timer is faster</p>
+        <p class="phase-banner" id="phase-banner" hidden></p>
       </div>
+      <div class="mech" id="boss-mech"></div>
       <div class="status-row">
         <span class="hearts" id="hearts"></span>
         <span class="combo mono" id="combo"></span>
       </div>
-      <div class="timer" id="timer"><span id="timer-fill"></span></div>
+      <div class="timer${type === "clock" ? " clock-timer" : ""}" id="timer"><span id="timer-fill"></span>${type === "clock" ? '<b id="clock-text"></b>' : ""}</div>
       <div class="powers" id="boss-powers"></div>
       <p class="eyebrow" id="boss-kind"></p>
       <p class="quiz-q" id="boss-q"></p>
       <div class="options" id="boss-options"></div>
       <p class="feedback" id="boss-log" aria-live="polite"></p>
     </div>`;
-  body.querySelector(".boss-name").textContent = bossName();
+  body.querySelector(".boss-name").textContent = bossName(type);
   setTimeout(() => $("boss-sprite")?.classList.remove("entering"), 700);
   fx.play("enrage");
   updateBossHud();
+  if (type === "clock") runClock();
   nextBossQuestion();
+}
+
+function banner(text) {
+  const b = $("phase-banner");
+  if (!b) return;
+  b.textContent = text;
+  b.hidden = false;
+  replay(b, "pop", 500);
+  clearTimeout(boss.bannerTimer);
+  boss.bannerTimer = setTimeout(() => { if ($("phase-banner") === b && boss.type !== "exam") b.hidden = true; }, 1600);
 }
 
 function updateBossHud() {
   const pct = `${(boss.hp / boss.max) * 100}%`;
   $("boss-hp").style.width = pct;
   $("boss-chip").style.width = pct; // the pale "chip" bar lags behind, like in fighting games
-  $("boss-hp-text").textContent = `${boss.hp} / ${boss.max}`;
+  $("boss-hp-text").textContent = boss.type === "hydra" ? `${boss.hp} ${boss.hp === 1 ? "head" : "heads"}` : `${boss.hp} / ${boss.max}`;
   $("boss-hp").parentElement.setAttribute("aria-valuenow", boss.hp);
   const hearts = $("hearts");
   while (hearts.children.length < boss.maxHearts) hearts.append(el("span", "heart", "♥"));
@@ -3178,6 +3308,114 @@ function updateBossHud() {
   const text = boss.combo >= 2 ? `Combo x${boss.combo}` : "";
   if (text && text !== combo.textContent) replay(combo, "bump", 300);
   combo.textContent = text;
+  renderMech();
+}
+
+// The part of the screen that's different for each boss.
+function renderMech() {
+  const box = $("boss-mech");
+  if (!box) return;
+  if (boss.type === "clock") {
+    if (!box.firstChild) {
+      const meter = el("div", "energy");
+      meter.setAttribute("role", "meter");
+      meter.setAttribute("aria-label", "Energy");
+      meter.setAttribute("aria-valuemin", "0");
+      meter.setAttribute("aria-valuemax", String(CLOCK.maxEnergy));
+      meter.append(el("span", "energy-label", "Energy"));
+      const cells = el("span", "energy-cells");
+      for (let i = 0; i < CLOCK.maxEnergy; i++) cells.append(el("i"));
+      meter.append(cells);
+      const atk = el("div", "attacks");
+      for (const a of ATTACKS) {
+        const b = el("button", `attack attack-${a.id}`);
+        b.type = "button";
+        b.dataset.attack = a.id;
+        b.append(el("strong", "", a.name), el("span", "", `${a.cost} energy · ${a.dmg} dmg`), el("kbd", "", a.key));
+        b.addEventListener("click", () => useAttack(a.id));
+        atk.append(b);
+      }
+      box.append(meter, atk);
+    }
+    const meter = box.querySelector(".energy");
+    meter.setAttribute("aria-valuenow", String(boss.energy));
+    [...box.querySelectorAll(".energy-cells i")].forEach((c, i) => c.classList.toggle("on", i < boss.energy));
+    box.querySelectorAll(".attack").forEach((b) => {
+      const a = ATTACKS.find((x) => x.id === b.dataset.attack);
+      const was = b.disabled;
+      b.disabled = !boss.active || boss.energy < a.cost;
+      if (was && !b.disabled) replay(b, "pop", 400); // just became affordable
+    });
+  } else if (boss.type === "shield") {
+    box.innerHTML = "";
+    const row = el("div", "shield-row");
+    row.append(el("span", "mech-label", boss.shield > 0 ? "Shield" : "Shield broken!"));
+    for (let i = 0; i < SHIELD.layers; i++) row.append(el("span", i < boss.shield ? "pip up" : "pip down", "⛨"));
+    if (boss.stagger > 0) row.append(el("span", "mech-hot", `Double damage: ${boss.stagger} ${boss.stagger === 1 ? "hit" : "hits"} left`));
+    box.append(row);
+  } else if (boss.type === "hydra") {
+    box.innerHTML = "";
+    const row = el("div", "heads-row");
+    row.setAttribute("aria-hidden", "true");
+    for (let i = 0; i < boss.hp; i++) row.append(el("span", "head-icon", "🐍"));
+    box.append(row);
+  } else {
+    box.innerHTML = "";
+  }
+}
+
+/* The Deadline's clock runs for the whole fight. */
+function runClock() {
+  const fill = $("timer-fill");
+  const timer = $("timer");
+  const label = $("clock-text");
+  const tick = (now) => {
+    if (!boss.active || boss.type !== "clock") return;
+    const dt = now - boss.clockLast;
+    boss.clockLast = now;
+    const frozen = now < boss.clockFrozenUntil;
+    if (!frozen) boss.clockLeft = Math.max(0, boss.clockLeft - dt);
+    timer.classList.toggle("frozen", frozen);
+    const frac = boss.clockLeft / CLOCK.ms;
+    fill.style.width = `${Math.min(1, frac) * 100}%`;
+    timer.classList.toggle("low", frac < 0.25);
+    label.textContent = `${Math.ceil(boss.clockLeft / 1000)}s`;
+    if (boss.clockLeft <= 0) {
+      boss.locked = true;
+      $("boss-options")?.querySelectorAll(".option").forEach((b) => { b.disabled = true; });
+      $("boss-log").textContent = "Time's up!";
+      fx.play("hurt");
+      boss.active = false;
+      boss.wait = setTimeout(() => endBoss(false), 1200);
+      return;
+    }
+    boss.clockRaf = requestAnimationFrame(tick);
+  };
+  cancelAnimationFrame(boss.clockRaf);
+  boss.clockRaf = requestAnimationFrame(tick);
+}
+
+function useAttack(id) {
+  if (!boss.active || boss.type !== "clock") return;
+  const a = ATTACKS.find((x) => x.id === id);
+  if (!a || boss.energy < a.cost) return;
+  boss.energy -= a.cost;
+  boss.attacks++;
+  boss.hp = Math.max(0, boss.hp - a.dmg);
+  const sprite = $("boss-sprite");
+  showDamage(a.dmg, a.cost >= 5);
+  replay(sprite, "hit", 320);
+  sparks($("dmg-layer"), 6 + a.cost * 3, a.cost >= 5 ? cssVar("--bad") : cssVar("--accent"));
+  if (a.cost >= 5) replay($("arena"), "crit-flash", 300);
+  fx.play(a.cost >= 3 ? "crit" : "hit");
+  updateBossHud();
+  if (boss.hp === 0) {
+    sprite.classList.add("defeated");
+    boss.active = false;
+    cancelAnimationFrame(boss.raf);
+    $("boss-options")?.querySelectorAll(".option").forEach((b) => { b.disabled = true; });
+    boss.wait = setTimeout(() => endBoss(true), 1000);
+  }
 }
 
 function nextBossQuestion() {
@@ -3189,10 +3427,10 @@ function nextBossQuestion() {
   boss.locked = false;
   boss.frozen = false;
   boss.fiftyUsed = false;
-  $("timer").classList.remove("frozen");
+  if (boss.type !== "clock") $("timer").classList.remove("frozen");
   $("boss-kind").textContent = q.kind === "card" ? "Which answer matches this?" : "Question";
   $("boss-q").textContent = q.prompt;
-  $("boss-log").textContent = "";
+  $("boss-log").textContent = boss.type === "clock" && boss.energy === 0 && boss.right === 0 ? "Answer to charge energy, then pick an attack." : "";
   const opts = $("boss-options");
   opts.innerHTML = "";
   q.options.forEach((text, n) => {
@@ -3203,10 +3441,12 @@ function nextBossQuestion() {
     b.addEventListener("click", () => bossAnswer(n));
     opts.append(b);
   });
+  boss.qStart = performance.now();
+  renderPowers();
+  if (boss.type === "clock") return; // The Deadline uses one clock for the whole fight
   // Longer questions get a bit more reading time.
   const chars = q.prompt.length + q.options.join("").length;
   boss.limit = (boss.enraged ? BOSS.enragedMs : BOSS.calmMs) + Math.min(6000, chars * 30);
-  boss.qStart = performance.now();
   const fill = $("timer-fill");
   const timer = $("timer");
   const tick = (now) => {
@@ -3218,11 +3458,11 @@ function nextBossQuestion() {
   };
   cancelAnimationFrame(boss.raf);
   boss.raf = requestAnimationFrame(tick);
-  renderPowers();
 }
 
-/* Power-ups bought at the prize counter */
+/* Power-ups bought at the prize counter (the Deadline uses them on its clock). */
 function timeLeft() {
+  if (boss.type === "clock") return Math.max(0, 1 - (performance.now() - boss.qStart) / CLOCK.quickMs);
   return boss.frozen ? boss.frozenLeft : Math.max(0, 1 - (performance.now() - boss.qStart) / boss.limit);
 }
 function renderPowers() {
@@ -3231,11 +3471,13 @@ function renderPowers() {
   box.innerHTML = "";
   const inv = player.inventory;
   if (!inv.heart && !inv.freeze && !inv.fifty) return; // nothing to show until you buy some
-  const ready = { heart: !boss.heartUsed, freeze: !boss.frozen, fifty: !boss.fiftyUsed };
+  const clock = boss.type === "clock";
+  const ready = { heart: !boss.heartUsed, freeze: clock ? performance.now() >= boss.clockFrozenUntil : !boss.frozen, fifty: !boss.fiftyUsed };
+  const label = { heart: clock ? "+10 seconds" : null, freeze: clock ? "Freeze the clock" : null };
   for (const item of POWERUPS) {
     const b = el("button", `power power-${item.id}`);
     b.type = "button";
-    b.append(el("span", "", item.name), el("span", "power-count", String(inv[item.id] || 0)));
+    b.append(el("span", "", label[item.id] || item.name), el("span", "power-count", String(inv[item.id] || 0)));
     b.disabled = !inv[item.id] || !ready[item.id] || boss.locked || !boss.active;
     b.addEventListener("click", () => usePower(item.id));
     box.append(b);
@@ -3243,18 +3485,31 @@ function renderPowers() {
 }
 function usePower(id) {
   if (!boss.active || boss.locked || !player.inventory[id]) return;
+  const clock = boss.type === "clock";
   if (id === "heart") {
     if (boss.heartUsed) return;
     boss.heartUsed = true;
-    boss.hearts++;
-    boss.maxHearts = Math.max(boss.maxHearts, boss.hearts);
+    if (clock) {
+      boss.clockLeft += 10_000;
+      banner("+10 seconds");
+    } else {
+      boss.hearts++;
+      boss.maxHearts = Math.max(boss.maxHearts, boss.hearts);
+    }
     fx.play("good");
   } else if (id === "freeze") {
-    if (boss.frozen) return;
-    boss.frozenLeft = timeLeft();
-    boss.frozen = true;
-    cancelAnimationFrame(boss.raf);
-    $("timer").classList.add("frozen");
+    if (clock) {
+      if (performance.now() < boss.clockFrozenUntil) return;
+      boss.clockFrozenUntil = performance.now() + 8000;
+      banner("Clock frozen for 8 seconds");
+      setTimeout(renderPowers, 8100);
+    } else {
+      if (boss.frozen) return;
+      boss.frozenLeft = timeLeft();
+      boss.frozen = true;
+      cancelAnimationFrame(boss.raf);
+      $("timer").classList.add("frozen");
+    }
     fx.play("flip");
   } else if (id === "fifty") {
     if (boss.fiftyUsed) return;
@@ -3270,8 +3525,8 @@ function usePower(id) {
   renderPowers();
 }
 
-function showDamage(amount, crit) {
-  const pop = el("span", crit ? "dmg crit" : "dmg", crit ? `CRIT ${amount}` : `-${amount}`);
+function showDamage(amount, crit, text) {
+  const pop = el("span", crit ? "dmg crit" : "dmg", text || (crit ? `CRIT ${amount}` : `-${amount}`));
   pop.style.left = `${35 + Math.random() * 30}%`;
   $("dmg-layer").append(pop);
   setTimeout(() => pop.remove(), 900);
@@ -3294,83 +3549,175 @@ function bossAnswer(choice) {
   boss.answered++;
   const log = $("boss-log");
   const sprite = $("boss-sprite");
+  const say = (ok, head, rest = "") => {
+    log.innerHTML = `<strong class="${ok ? "ok" : "no"}"></strong> <span></span>`;
+    log.firstChild.textContent = head;
+    log.lastChild.textContent = rest;
+  };
+  const win = () => {
+    sprite.classList.add("defeated");
+    boss.active = false;
+    boss.wait = setTimeout(() => endBoss(true), 1000);
+  };
 
   if (choice === q.answer) {
     boss.right++;
     boss.combo++;
     boss.maxCombo = Math.max(boss.maxCombo, boss.combo);
+    const comboText = boss.combo >= 2 ? `Combo x${boss.combo}.` : "";
+
+    if (boss.type === "clock") {
+      const quick = left > 0;
+      const gain = Math.min(quick ? 2 : 1, CLOCK.maxEnergy - boss.energy);
+      boss.energy += gain;
+      fx.play("good");
+      say(true, gain ? `+${gain} energy${quick ? " (quick!)" : ""}` : "Energy full! Use an attack.", "");
+      updateBossHud();
+      boss.wait = setTimeout(nextBossQuestion, 450);
+      return;
+    }
+
+    if (boss.type === "hydra") {
+      const chops = boss.combo % 3 === 0 ? 2 : 1;
+      boss.hp = Math.max(0, boss.hp - chops);
+      showDamage(chops, chops > 1, chops > 1 ? "DOUBLE CHOP" : "CHOP");
+      replay(sprite, "hit", 320);
+      sparks($("dmg-layer"), chops > 1 ? 16 : 9, cssVar("--accent"));
+      fx.play(chops > 1 ? "crit" : "hit");
+      say(true, chops > 1 ? "Two heads off!" : "Head chopped off!", comboText);
+      updateBossHud();
+      if (boss.hp === 0) return win();
+      boss.wait = setTimeout(nextBossQuestion, 850);
+      return;
+    }
+
+    if (boss.type === "shield" && boss.shield > 0) {
+      boss.shield--;
+      replay(sprite, "hit", 320);
+      fx.play("flip");
+      if (boss.shield === 0) {
+        boss.stagger = SHIELD.staggerHits;
+        banner("Shield broken! Double damage now");
+        sparks($("dmg-layer"), 14, cssVar("--yellow"));
+        fx.play("crit");
+        say(true, "Shield broken!", `Your next ${SHIELD.staggerHits} right answers do double damage.`);
+      } else {
+        say(true, "Shield cracked!", `${boss.shield} ${boss.shield === 1 ? "layer" : "layers"} left.`);
+      }
+      updateBossHud();
+      boss.wait = setTimeout(nextBossQuestion, 750);
+      return;
+    }
+
+    // The Final Exam, or the Proctor with its shield down: a damage hit.
     const crit = left > BOSS.critAbove;
     const comboBonus = 1 + Math.min(boss.combo - 1, 5) * 0.1;   // up to +50%
     const speedBonus = 1 + 0.5 * left;                           // up to +50%
-    const dmg = Math.round(BOSS.baseDamage * speedBonus * comboBonus * (crit ? 1.5 : 1));
+    const mult = boss.type === "shield" ? SHIELD.damage : (crit ? 1.5 : 1);
+    const dmg = Math.round(BOSS.baseDamage * speedBonus * comboBonus * mult);
     boss.hp = Math.max(0, boss.hp - dmg);
-    showDamage(dmg, crit);
+    showDamage(dmg, crit || boss.type === "shield");
     replay(sprite, "hit", 320);
     sparks($("dmg-layer"), crit ? 16 : 9, crit ? cssVar("--bad") : cssVar("--accent"));
     if (crit) replay($("arena"), "crit-flash", 300);
     fx.play(crit ? "crit" : "hit");
-    log.innerHTML = `<strong class="ok">${crit ? "Critical hit!" : "Hit!"}</strong> <span></span>`;
-    log.lastChild.textContent = boss.combo >= 2 ? `Combo x${boss.combo}.` : "";
-    updateBossHud();
-    if (boss.hp === 0) {
-      sprite.classList.add("defeated");
-      boss.wait = setTimeout(() => endBoss(true), 1000);
-      return;
+    say(true, boss.type === "shield" ? "Direct hit!" : crit ? "Critical hit!" : "Hit!", comboText);
+    if (boss.type === "shield") {
+      boss.stagger--;
+      if (boss.stagger === 0 && boss.hp > 0) {
+        boss.shield = SHIELD.layers;
+        banner("The shield is back up");
+      }
     }
-    if (!boss.enraged && boss.hp <= boss.max / 2) {
+    updateBossHud();
+    if (boss.hp === 0) return win();
+    if (boss.type === "exam" && !boss.enraged && boss.hp <= boss.max / 2) {
       boss.enraged = true;
       sprite.classList.add("enraged");
+      $("phase-banner").textContent = "Enraged! The timer is faster";
       $("phase-banner").hidden = false;
       setTimeout(() => fx.play("enrage"), 250);
     }
     boss.wait = setTimeout(nextBossQuestion, 850);
-  } else {
-    boss.combo = 0;
-    boss.hearts--;
-    boss.missed.set(q.prompt, q);
-    boss.pool.splice(Math.min(boss.qi + 3, boss.pool.length), 0, q); // it comes back soon
-    replay(sprite, "attack", 420);
-    replay($("arena"), "hurt", 420);
-    fx.play("hurt");
-    log.innerHTML = `<strong class="no">${choice < 0 ? "Too slow!" : "Ouch!"}</strong> <span></span>`;
-    log.lastChild.textContent = `Answer: ${q.options[q.answer]}. ${q.explain}`;
-    updateBossHud();
-    if (boss.hearts === 0) {
-      boss.wait = setTimeout(() => endBoss(false), 2000);
-      return;
-    }
-    boss.wait = setTimeout(nextBossQuestion, 2200);
+    return;
   }
+
+  // Wrong answer, or out of time.
+  boss.combo = 0;
+  boss.missed.set(q.prompt, q);
+  boss.pool.splice(Math.min(boss.qi + 3, boss.pool.length), 0, q); // it comes back soon
+  replay(sprite, "attack", 420);
+  replay($("arena"), "hurt", 420);
+  fx.play("hurt");
+  const answerText = `Answer: ${q.options[q.answer]}. ${q.explain}`;
+  if (boss.type === "clock") {
+    boss.clockLeft = Math.max(0, boss.clockLeft - CLOCK.wrongPenaltyMs);
+    say(false, `-${CLOCK.wrongPenaltyMs / 1000} seconds!`, answerText);
+    updateBossHud();
+    boss.wait = setTimeout(nextBossQuestion, 1800);
+    return;
+  }
+  boss.hearts--;
+  let head = choice < 0 ? "Too slow!" : "Ouch!";
+  if (boss.type === "shield") {
+    const was = boss.shield;
+    boss.shield = SHIELD.layers;
+    boss.stagger = 0;
+    if (was < SHIELD.layers) { head += " The shield is back up."; banner("Shield restored"); }
+  } else if (boss.type === "hydra") {
+    if (boss.hp < boss.headsMax) {
+      boss.hp++;
+      boss.max = Math.max(boss.max, boss.hp);
+      head += " It grew a new head.";
+      banner("It grew another head!");
+    }
+  }
+  say(false, head, answerText);
+  updateBossHud();
+  if (boss.hearts <= 0) {
+    boss.active = false;
+    boss.wait = setTimeout(() => endBoss(false), 2000);
+    return;
+  }
+  boss.wait = setTimeout(nextBossQuestion, 2200);
 }
 
 function endBoss(won) {
   stopBoss();
+  const type = boss.type;
   const secs = (Date.now() - boss.start) / 1000;
-  const accuracy = Math.round((boss.right / boss.answered) * 100);
+  const accuracy = boss.answered ? Math.round((boss.right / boss.answered) * 100) : 0;
   let record = false;
   if (won) {
-    const best = Number(safeGet(bossKey()));
-    if (!best || secs < best) { safeSet(bossKey(), String(secs)); record = true; }
+    const best = Number(safeGet(bossKey(type)));
+    if (!best || secs < best) { safeSet(bossKey(type), String(secs)); record = true; }
   }
-  const rank = boss.hearts >= BOSS.hearts && accuracy >= 90 ? "S" : boss.hearts >= 2 ? "A" : "B";
+  const timeLeftFrac = boss.clockLeft / CLOCK.ms;
+  const rank = type === "clock"
+    ? (timeLeftFrac >= 0.35 && accuracy >= 85 ? "S" : timeLeftFrac >= 0.15 ? "A" : "B")
+    : (boss.hearts >= BOSS.hearts && accuracy >= 90 ? "S" : boss.hearts >= 2 ? "A" : "B");
   const base = won
     ? 50 + { S: 60, A: 30, B: 10 }[rank] + Math.min(boss.maxCombo * 5, 40) + (boss.missed.size === 0 ? 25 : 0)
     : Math.min(boss.right * 2, 20);
-  const got = award(base, won ? "for beating the boss" : "for the hits you landed", "boss", { win: won });
+  const got = award(base, won ? `for beating ${bossName(type)}` : "for the hits you landed", "boss", { win: won });
   reportToClass({ kind: "boss", won, accuracy, secs, missed: [...boss.missed.keys()], asked: [...boss.asked] });
 
   if (won) { confetti(120); fx.play("win"); } else fx.play("lose");
-  const card = el("div", "quiz-card boss-end");
-  card.append(el("p", "eyebrow", won ? "Boss defeated" : "You were defeated"));
+  const card = el("div", `quiz-card boss-end boss-${type}`);
+  card.append(el("p", "eyebrow", won ? `${bossName(type)} defeated` : `${bossName(type)} won this time`));
   card.append(el("p", won ? `score-big rank-${rank}` : "score-big", won ? `Rank ${rank}` : "Try again"));
   const stats = el("div", "stats");
-  [[`${secs.toFixed(1)}s`, "Time"], [`${accuracy}%`, "Accuracy"], [`x${boss.maxCombo}`, "Best combo"], [String(boss.hearts), "Hearts left"]]
+  const last = type === "clock"
+    ? [`${Math.ceil(boss.clockLeft / 1000)}s`, "Time left"]
+    : [String(Math.max(0, boss.hearts)), "Hearts left"];
+  [[`${secs.toFixed(1)}s`, "Time"], [`${accuracy}%`, "Accuracy"], [`x${boss.maxCombo}`, "Best combo"], last]
     .forEach(([value, label]) => {
       const box = el("div");
       box.append(el("strong", "", value), el("span", "", label));
       stats.append(box);
     });
   card.append(stats);
+  if (!won && type === "clock" && boss.energy >= 1) card.append(el("p", "muted small", `You still had ${boss.energy} energy saved. Spend it before the clock runs out!`));
   if (got > 0) {
     const prize = el("p", "prize-line");
     prize.append(el("strong", "", `+${got} tickets`));
@@ -3379,7 +3726,7 @@ function endBoss(won) {
     else prize.append(el("span", "muted small", " Spend them at the prize counter, or start a crew to compete with friends."));
     card.append(prize);
   }
-  if (record) card.append(el("p", "record", "New best time!"));
+  if (record) card.append(el("p", "record", "New best time against this boss!"));
   if (boss.missed.size) {
     card.append(el("p", "label", "Review these before the rematch"));
     const list = el("ul", "review");
@@ -3393,13 +3740,16 @@ function endBoss(won) {
     card.append(el("p", "", "Flawless: you didn't miss a single question."));
   }
   const row = el("div", "card-controls");
-  const again = el("button", "btn btn-primary", won ? "Fight again" : "Rematch");
+  const again = el("button", "btn btn-primary", won ? "Fight it again" : "Rematch");
   again.type = "button";
-  again.addEventListener("click", startBoss);
-  const study = el("button", "btn", "Study the flashcards");
+  again.addEventListener("click", () => startBoss(type));
+  const next = el("button", "btn", "Fight a new boss");
+  next.type = "button";
+  next.addEventListener("click", () => { boss.next = pickBoss(type); renderBossIntro(boss.next); });
+  const study = el("button", "btn btn-quiet", "Study the flashcards");
   study.type = "button";
   study.addEventListener("click", () => showView("cards"));
-  row.append(again, study);
+  row.append(again, next, study);
   card.append(row);
   const body = $("boss-body");
   body.innerHTML = "";
@@ -3408,9 +3758,13 @@ function endBoss(won) {
 }
 
 document.addEventListener("keydown", (e) => {
-  if ($("view-boss").hidden || !boss.active || e.target.matches("textarea, input")) return;
+  if ($("view-boss").hidden || !boss.active || e.target.matches("textarea, input") || e.ctrlKey || e.metaKey || e.altKey) return;
   const n = "1234".indexOf(e.key);
-  if (e.key.length === 1 && n >= 0) bossAnswer(n);
+  if (e.key.length === 1 && n >= 0) { bossAnswer(n); return; }
+  if (boss.type === "clock") {
+    const a = ATTACKS.find((x) => x.key.toLowerCase() === e.key.toLowerCase());
+    if (a) useAttack(a.id);
+  }
 });
 
 /* ---------- Making a set with AI ----------
@@ -3447,6 +3801,7 @@ function setAiLimit(data) {
   ai.limit = data.limit || ai.limit;
   ai.left = data.left;
   if (typeof data.signedIn === "boolean") ai.signedIn = data.signedIn;
+  if (data.sessionValid === false && safeGet(SESSION_KEY)) signOut(true); // expired: say so instead of silently counting as a guest
   if (data.perAccount) ai.perAccount = data.perAccount;
   renderAiLimit();
 }
@@ -3679,6 +4034,43 @@ $("make-form").addEventListener("submit", async (e) => {
 if (!NATIVE && "serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
   window.addEventListener("load", () => { navigator.serviceWorker.register("/sw.js").catch(() => {}); });
 }
+// When a new version of the site goes live, pages that are already open pick it up:
+// right away if you're not looking at the tab, otherwise with a "Refresh" bar (so it never
+// reloads in the middle of a boss fight or while you're typing).
+if (!NATIVE && location.protocol === "https:") {
+  let liveTag = null;
+  const versionTag = async () => {
+    try {
+      const res = await fetch("/app.js", { method: "HEAD", cache: "no-store" });
+      return res.headers.get("etag") || res.headers.get("last-modified");
+    } catch { return null; }
+  };
+  const showUpdateBar = () => {
+    if ($("update-bar")) return;
+    const bar = el("div", "update-bar");
+    bar.id = "update-bar";
+    bar.setAttribute("role", "status");
+    bar.append(el("span", "", "Cram Arcade was updated."));
+    const go = el("button", "btn btn-primary btn-small", "Refresh");
+    go.type = "button";
+    go.addEventListener("click", () => location.reload());
+    bar.append(go);
+    document.body.append(bar);
+  };
+  const checkForUpdate = async () => {
+    const tag = await versionTag();
+    if (!tag) return;
+    if (!liveTag) { liveTag = tag; return; }
+    if (tag === liveTag) return;
+    const busy = boss.active || document.querySelector("dialog[open]") || (document.activeElement && document.activeElement.matches("textarea, input"));
+    if (document.hidden && !busy) location.reload();
+    else showUpdateBar();
+  };
+  checkForUpdate();
+  setInterval(checkForUpdate, 5 * 60_000);
+  document.addEventListener("visibilitychange", checkForUpdate);
+}
+
 // Android phones get the real app (downloaded from this site). Computers can still
 // install the web version when the browser offers it.
 let installPrompt = null;

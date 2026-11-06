@@ -135,11 +135,14 @@ export default async function handler(req, res) {
   if (cors(req, res)) return;
   const session = readSession(req);
   const who = whoIs(session, req.body?.device || req.query?.device);
+  // Tell the page when it sent a sign-in that's no longer valid, so it can sign out cleanly
+  // instead of looking signed in while being counted as a guest.
+  const sessionValid = req.headers?.authorization ? Boolean(session) : null;
 
   // GET: how many AI sets this person has left today.
   if (req.method === "GET") {
     const u = await usageFor(who).catch(() => ({ limit: who.limit, used: 0, left: who.limit, signedIn: who.signedIn }));
-    return res.status(200).json({ ...u, perAccount: LIMITS.perAccount });
+    return res.status(200).json({ ...u, perAccount: LIMITS.perAccount, sessionValid });
   }
   if (req.method !== "POST") return res.status(405).json({ error: "Use GET or POST." });
   if (!originAllowed(req)) return res.status(403).json({ error: "AI study sets can only be made from Cram Arcade." });

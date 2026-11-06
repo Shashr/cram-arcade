@@ -4,7 +4,7 @@
 // - /api/ requests (AI sets, crews, classes, sign-in) and app downloads always go to the internet.
 // - Fonts are cached after the first visit.
 // Change VERSION whenever you want every phone to fetch fresh files right away.
-const VERSION = "cram-v3";
+const VERSION = "cram-v4";
 const APP_FILES = [
   "/", "/index.html", "/style.css", "/app.js", "/manifest.webmanifest",
   "/icons/icon-192.png", "/icons/icon-512.png", "/icons/maskable-512.png", "/icons/favicon-32.png",

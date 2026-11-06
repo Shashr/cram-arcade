@@ -67,17 +67,24 @@ export function clientIp(req) {
   return ip.trim().replace(/[^0-9a-fA-F:.]/g, "").slice(0, 64) || "unknown";
 }
 
-// Who the limit belongs to: the account if signed in, otherwise this device.
+// Who the limit belongs to. Every set counts against BOTH the device and (when signed in)
+// the account, so neither signing out nor signing in gives anyone extra sets:
+// - signed in: the account's 5 a day, and this device can't go past 5 either;
+// - guest: this device's 3 a day, which includes sets made here while signed in.
 export function whoIs(session, deviceId) {
-  if (session?.sub) return { key: `acct:${session.sub}`, limit: LIMITS.perAccount, signedIn: true };
   const id = String(deviceId || "").replace(/[^a-zA-Z0-9-]/g, "").slice(0, 64);
-  return { key: `dev:${id || "none"}`, limit: LIMITS.perGuest, signedIn: false };
+  const device = `dev:${id || "none"}`;
+  if (session?.sub) {
+    return { signedIn: true, limit: LIMITS.perAccount, counters: [[`acct:${session.sub}`, LIMITS.perAccount], [device, LIMITS.perAccount]] };
+  }
+  return { signedIn: false, limit: LIMITS.perGuest, counters: [[device, LIMITS.perGuest]] };
 }
 
 export async function usageFor(who) {
   const counts = await db.hgetall(dayKey());
-  const used = Number(counts[who.key] || 0);
-  return { limit: who.limit, used, left: Math.max(0, who.limit - used), signedIn: who.signedIn };
+  // What's left is decided by whichever counter is closest to its limit.
+  const left = Math.max(0, Math.min(...who.counters.map(([key, max]) => max - Number(counts[key] || 0))));
+  return { limit: who.limit, used: who.limit - Math.min(left, who.limit), left: Math.min(left, who.limit), signedIn: who.signedIn };
 }
 
 // Takes one set out of every limit and reserves its worst-case cost. Returns a ticket used
@@ -93,7 +100,7 @@ export async function reserve(who, ip, worstCaseMicro) {
   const rollback = () => Promise.all(undo.map(([k, f, a]) => db.hincrby(k, f, -a))).catch(() => {});
   try {
     const checks = [
-      [() => take(day, who.key, 1, who.limit), "person"],
+      ...who.counters.map(([key, max]) => [() => take(day, key, 1, max), "person"]),
       [() => take(minute, `ip:${ip}`, 1, LIMITS.perNetworkMinute), "minute"],
       [() => take(day, `ip:${ip}`, 1, LIMITS.perNetworkDay), "network"],
       [() => take(day, "all", 1, LIMITS.perDay), "site"],
@@ -107,7 +114,7 @@ export async function reserve(who, ip, worstCaseMicro) {
       }
     }
     await Promise.all([db.expire(day, 3 * 86400), db.expire(month, 40 * 86400), db.expire(minute, 180)]);
-    return { ticket: { day, month, who: who.key, ip, reserved: worstCaseMicro, undo } };
+    return { ticket: { day, month, ip, reserved: worstCaseMicro, undo } };
   } catch (err) {
     await rollback();
     throw err;

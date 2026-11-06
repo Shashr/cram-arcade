@@ -1065,3 +1065,74 @@ textarea:hover, .text-input:hover { border-color: var(--muted); }
 .file-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
 .file-remove { font: inherit; font-size: 1.1rem; line-height: 1; width: 28px; height: 28px; border: 0; border-radius: 50%; background: none; color: var(--muted); cursor: pointer; }
 .file-remove:hover { color: var(--bad); background: var(--panel); }
+
+/* "Cram Arcade was updated" bar */
+.update-bar {
+  position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 70;
+  transform: translateX(-50%); display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px 10px 16px; border-radius: 14px; max-width: calc(100% - 32px);
+  background: var(--panel); color: var(--text); border: 3px solid #1c1240; box-shadow: 4px 4px 0 #0d0726;
+  font-weight: 700;
+}
+@media (max-width: 640px) { .update-bar { bottom: calc(90px + env(safe-area-inset-bottom, 0px)); } }
+
+/* ---------- The four bosses ---------- */
+/* The Deadline (clock) */
+.boss-sprite .bell { fill: #ffc93c; stroke: #0d0726; stroke-width: 3; }
+.boss-sprite .hand { fill: none; stroke: #d92d3f; stroke-width: 5; stroke-linecap: round; }
+.boss-clock .boss-sprite { filter: drop-shadow(0 10px 16px rgba(255, 201, 60, 0.4)); }
+/* The Ironclad Proctor (shield) */
+.boss-sprite .metal { fill: #c9cfe0; stroke: #0d0726; stroke-width: 3; }
+.boss-sprite .visor { fill: #0d0726; }
+.boss-sprite .glow { fill: #ff4f5e; }
+.boss-sprite .plume { fill: #d92d3f; stroke: #0d0726; stroke-width: 2.5; }
+.boss-sprite .shield-art { fill: #3a9de0; stroke: #0d0726; stroke-width: 3; }
+.boss-shield .boss-sprite .grade { fill: #ffffff; font-size: 12px; }
+.boss-shield .boss-sprite { filter: drop-shadow(0 10px 16px rgba(58, 157, 224, 0.45)); }
+/* The Homework Hydra */
+.boss-sprite .scales { fill: #36c47a; stroke: #0d0726; stroke-width: 3; }
+.boss-sprite .neck { fill: none; stroke: #0d0726; stroke-width: 13; stroke-linecap: round; }
+.boss-sprite .neck + .neck, .boss-sprite path.neck { stroke: #36c47a; }
+.boss-hydra .boss-sprite .eye { fill: #ffc93c; }
+.boss-hydra .boss-sprite { filter: drop-shadow(0 10px 16px rgba(54, 196, 122, 0.4)); }
+
+.mech:empty { display: none; }
+.mech { display: grid; gap: 10px; }
+.mech-label { font-weight: 700; }
+.mech-hot { font-family: var(--sign); color: var(--yellow); text-shadow: 2px 2px 0 #0d0726; }
+
+/* Deadline: energy cells and attack buttons */
+.energy { display: flex; align-items: center; gap: 10px; }
+.energy-label { font-weight: 700; }
+.energy-cells { display: flex; gap: 5px; flex: 1; }
+.energy-cells i { flex: 1; max-width: 34px; height: 16px; border-radius: 5px; background: rgba(255, 255, 255, 0.12); border: 2px solid #0d0726; }
+.energy-cells i.on { background: linear-gradient(#ffe27a, #ffc93c); box-shadow: 0 0 8px rgba(255, 201, 60, 0.7); }
+.attacks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.attack {
+  position: relative; display: grid; gap: 2px; justify-items: center; text-align: center;
+  padding: 10px 6px 8px; border-radius: 12px; cursor: pointer; font: inherit;
+  background: var(--yellow); color: #1c1240; border: 3px solid #0d0726; box-shadow: 3px 3px 0 #0d0726;
+}
+.attack strong { font-family: var(--sign); font-weight: 400; font-size: 1rem; line-height: 1.1; }
+.attack span { font-size: 0.75rem; font-weight: 700; }
+.attack kbd { position: absolute; top: 4px; right: 6px; font-size: 0.65rem; opacity: 0.7; font-family: inherit; }
+.attack-slam { background: #ff9a3c; }
+.attack-blast { background: var(--red); color: #ffffff; }
+.attack:hover:not(:disabled) { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 #0d0726; }
+.attack:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #0d0726; }
+.attack:disabled { background: rgba(255, 255, 255, 0.1); color: var(--carpet-muted); border-color: rgba(255, 255, 255, 0.25); box-shadow: none; cursor: not-allowed; }
+.clock-timer { position: relative; height: 26px; }
+.clock-timer b { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--sign); font-weight: 400; font-size: 0.9rem; color: #ffffff; text-shadow: 1px 1px 0 #0d0726; }
+
+/* Proctor: shield layers */
+.shield-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pip { font-size: 1.6rem; line-height: 1; color: #3a9de0; text-shadow: 2px 2px 0 #0d0726; }
+.pip.down { color: rgba(255, 255, 255, 0.2); text-shadow: none; }
+
+/* Hydra: heads left */
+.heads-row { display: flex; flex-wrap: wrap; gap: 4px; font-size: 1.5rem; line-height: 1; }
+
+@media (max-width: 400px) {
+  .attack strong { font-size: 0.85rem; }
+  .attack span { font-size: 0.68rem; }
+}
