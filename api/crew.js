@@ -5,6 +5,7 @@
 //
 // Requests (all JSON):
 //   GET  /api/crew?code=ABCDE                                  -> the leaderboard
+//   POST { action: "board",  code, playerId }                  -> leaderboard with your row marked
 //   POST { action: "create", crewName, playerId, name, plate } -> new crew + leaderboard
 //   POST { action: "join",   code, playerId, name, plate }     -> leaderboard
 //   POST { action: "score",  code, playerId, tickets, win }     -> leaderboard
@@ -14,6 +15,7 @@
 // The server caps each report and how often a player can report, which is fine
 // for friends; a public game would need the server to run the games itself.
 
+import crypto from "node:crypto";
 import { db } from "./_db.js";
 import { cors } from "./_cors.js";
 
@@ -66,7 +68,10 @@ function tooManyReports(playerId) {
   return recent.length > MAX_REPORTS_PER_HOUR;
 }
 
-async function board(code) {
+// The leaderboard never sends anyone's player id (it works like a password for score
+// reports). Each row gets a short public tag instead, and the asker's own row is marked "me".
+const tag = (id) => crypto.createHash("sha256").update(`crew-row:${id}`).digest("hex").slice(0, 12);
+async function board(code, viewerId) {
   const k = keys(code);
   const [meta, names, total, wins, week] = await Promise.all([
     db.hgetall(k.meta), db.hgetall(k.names), db.hgetall(k.total), db.hgetall(k.wins), db.hgetall(k.week),
@@ -75,7 +80,8 @@ async function board(code) {
     let profile = {};
     try { profile = JSON.parse(raw); } catch { /* ignore */ }
     return {
-      id,
+      id: tag(id),
+      me: Boolean(viewerId) && id === viewerId,
       name: profile.name || "Player",
       plate: PLATES.has(profile.plate) ? profile.plate : "classic",
       total: Number(total[id] || 0),
@@ -116,7 +122,7 @@ export default async function handler(req, res) {
       await db.hset(keys(code).meta, "name", crewName);
       await saveProfile(code, playerId, body.name, body.plate);
       await touch(code);
-      return res.status(200).json(await board(code));
+      return res.status(200).json(await board(code, playerId));
     }
 
     const code = cleanCode(body.code);
@@ -124,6 +130,8 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: "No crew has that code. Check it and try again." });
     }
     const k = keys(code);
+
+    if (action === "board") return res.status(200).json(await board(code, playerId));
 
     if (action === "join" || action === "profile") {
       if (!cleanName(body.name)) return res.status(400).json({ error: "Pick a nickname first." });
@@ -133,7 +141,7 @@ export default async function handler(req, res) {
       }
       await saveProfile(code, playerId, body.name, body.plate);
       await touch(code);
-      return res.status(200).json(await board(code));
+      return res.status(200).json(await board(code, playerId));
     }
 
     if (action === "score") {
@@ -147,7 +155,7 @@ export default async function handler(req, res) {
         body.win ? db.hincrby(k.wins, playerId, 1) : null,
       ]);
       await touch(code);
-      return res.status(200).json(await board(code));
+      return res.status(200).json(await board(code, playerId));
     }
 
     return res.status(400).json({ error: "Unknown action." });

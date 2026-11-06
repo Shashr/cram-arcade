@@ -448,7 +448,10 @@ function award(base, reason, game, { win = false } = {}) {
 async function crewApi(body) {
   const res = body ? await fetch(API + "/api/crew", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
-  }) : await fetch(`${API}/api/crew?code=${encodeURIComponent(player.crew.code)}`);
+  }) : await fetch(API + "/api/crew", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "board", code: player.crew.code, playerId: player.id }),
+  });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Couldn't reach the leaderboard. Check your connection.");
   return data;
@@ -591,7 +594,7 @@ function crewForm() {
 }
 
 function chaseLine(players, me, key) {
-  const myIndex = players.findIndex((p) => p.id === player.id);
+  const myIndex = players.findIndex((p) => p.me);
   if (myIndex < 0 || players.length < 2) return "Share your crew code so friends can join.";
   if (myIndex === 0) {
     const gap = me[key] - players[1][key];
@@ -632,10 +635,10 @@ function renderCrewBoard(body) {
   body.append(tabs);
 
   const players = [...b.players].sort((x, y) => y[crewTab] - x[crewTab] || y.wins - x.wins);
-  const me = players.find((p) => p.id === player.id);
+  const me = players.find((p) => p.me);
   const list = el("ol", "board");
   players.forEach((p, i) => {
-    const row = el("li", p.id === player.id ? "board-row me" : "board-row");
+    const row = el("li", p.me ? "board-row me" : "board-row");
     row.append(el("span", `board-rank rank-${i + 1}`, String(i + 1)));
     const who = el("span", "board-who");
     who.append(plateTag(p.name, p.plate), el("span", "muted small", `${p.wins} boss win${p.wins === 1 ? "" : "s"}`));
@@ -1465,7 +1468,7 @@ function planSessions(test) {
     added++;
   }
   savePlayer();
-  if (added) ticketToastText(`Planned ${added} study session${added === 1 ? "" : "s"}. Finish each one for ${SESSION_TICKETS} tickets.`);
+  if (added) ticketToastText(`Planned ${added} study session${added === 1 ? "" : "s"}. Answer ${SESSION_GOAL} questions in each one for ${SESSION_TICKETS} tickets.`);
   return added;
 }
 
@@ -1625,7 +1628,7 @@ function renderReminders() {
 let popSession = null;
 function showReminderPop(session) {
   popSession = session;
-  $("reminder-pop-text").textContent = `Study time! ${sessionTitle(session)}. Finish this session for ${SESSION_TICKETS} tickets.`;
+  $("reminder-pop-text").textContent = `Study time! ${sessionTitle(session)}. Answer ${SESSION_GOAL} questions or cards to earn ${SESSION_TICKETS} tickets.`;
   $("reminder-pop").hidden = false;
   fx.play("enrage");
   if (document.hidden && "Notification" in window && Notification.permission === "granted") {
@@ -1707,7 +1710,7 @@ function phoneReminderList() {
     list.push({
       id: reminderId(`session:${s.id}`),
       title: "Study time!",
-      body: `${sessionTitle(s)}. Finish it for ${SESSION_TICKETS} tickets.`,
+      body: `${sessionTitle(s)}. Answer ${SESSION_GOAL} questions for ${SESSION_TICKETS} tickets.`,
       at, extra: { kind: "session", id: s.id },
     });
   }
@@ -2748,6 +2751,8 @@ openJoinLink();
 
 $("open-class").addEventListener("click", async () => {
   openSheet("classroom");
+  // A teacher coming back sees fresh numbers, not the ones from when they last looked.
+  if (classUi.dashboard) { openDashboard(classUi.dashboard.code); return; }
   if ((player.classes || []).length) { await refreshStudentClasses(); if (!classUi.dashboard) renderClassroom(); }
 });
 flushClassQueue();
