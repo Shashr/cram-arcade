@@ -12,9 +12,9 @@
 // Setup (see README): MICROSOFT_CLIENT_ID and/or GOOGLE_CLIENT_ID, and SESSION_SECRET =
 // any long random text. We only use the player's name and email.
 
-import crypto from "node:crypto";
 import { db } from "./_db.js";
 import { cors } from "./_cors.js";
+import { SECRET, makeSession, readSession } from "./_session.js";
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const MS_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID;
@@ -22,30 +22,7 @@ const MS_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID;
 const GRAPH_ME_URL = process.env.GRAPH_ME_URL || "https://graph.microsoft.com/v1.0/me";
 // Google's official endpoint for checking a sign-in token. Can be swapped out for tests.
 const TOKENINFO_URL = process.env.GOOGLE_TOKENINFO_URL || "https://oauth2.googleapis.com/tokeninfo";
-// In test mode (no database) a random secret is fine: sessions just end when the server restarts.
-const SECRET = process.env.SESSION_SECRET || (db.mode === "test" ? crypto.randomBytes(32).toString("hex") : "");
-const SESSION_DAYS = 60;
 const MAX_DATA_BYTES = 300_000;
-
-function makeSession(sub) {
-  const body = Buffer.from(JSON.stringify({ sub, exp: Date.now() + SESSION_DAYS * 86_400_000 })).toString("base64url");
-  const mac = crypto.createHmac("sha256", SECRET).update(body).digest("base64url");
-  return `${body}.${mac}`;
-}
-
-function readSession(req) {
-  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  const [body, mac] = token.split(".");
-  if (!body || !mac) return null;
-  const expected = crypto.createHmac("sha256", SECRET).update(body).digest("base64url");
-  if (mac.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) return null;
-  try {
-    const payload = JSON.parse(Buffer.from(body, "base64url").toString());
-    return payload.exp > Date.now() ? payload : null;
-  } catch {
-    return null;
-  }
-}
 
 async function checkGoogleToken(credential) {
   const res = await fetch(`${TOKENINFO_URL}?id_token=${encodeURIComponent(credential)}`);

@@ -841,6 +841,7 @@ async function signIn(payload) {
     if (!player.name && profile.name) player.name = profile.name;
     applyData(mergeData(localData(), data));
     await pushSync();
+    loadAiLimit();
     fx.play("win");
     renderAccountChip();
     renderAccount();
@@ -3418,7 +3419,13 @@ document.addEventListener("keydown", (e) => {
 const source = $("source");
 source.addEventListener("input", () => { $("char-count").textContent = `${source.value.length} / 8000`; });
 
-const ai = { limit: 5, left: 5, files: [] };
+const ai = { limit: 3, left: 3, files: [], signedIn: false, perAccount: 5 };
+function aiHeaders(json) {
+  const h = json ? { "content-type": "application/json" } : {};
+  const session = safeGet(SESSION_KEY);
+  if (session) h.authorization = `Bearer ${session}`;
+  return h;
+}
 // The AI limit follows this device, not the account, so signing in and out doesn't reset it.
 const DEVICE_ID = safeGet("cram-device") || (() => { const id = newPlayerId(); safeSet("cram-device", id); return id; })();
 function renderAiLimit() {
@@ -3428,9 +3435,10 @@ function renderAiLimit() {
   for (let i = 0; i < ai.limit; i++) dots.append(el("span", i < ai.left ? "on" : ""));
   const out = ai.left <= 0;
   $("ai-limit").classList.toggle("empty", out);
+  const guest = !ai.signedIn && ai.perAccount > ai.limit && !NATIVE;
   $("ai-limit-note").textContent = out
-    ? `You've used today's ${ai.limit}. More at midnight. You can still type your own set (no limit).`
-    : `Everyone gets ${ai.limit} a day, and they refill at midnight. "Type my own" has no limit.`;
+    ? `You've used today's ${ai.limit}. More at midnight.${guest ? ` Sign in to get ${ai.perAccount} a day.` : ""} You can still type your own set (no limit).`
+    : `${ai.signedIn ? `You get ${ai.limit} a day` : `Guests get ${ai.limit} a day${guest ? ` (sign in for ${ai.perAccount})` : ""}`}, and they refill at midnight. "Type my own" has no limit.`;
   $("make-btn").disabled = out;
   $("make-btn").textContent = out ? "No AI sets left today" : "Make my study set";
 }
@@ -3438,11 +3446,13 @@ function setAiLimit(data) {
   if (!data || !Number.isFinite(data.left)) return;
   ai.limit = data.limit || ai.limit;
   ai.left = data.left;
+  if (typeof data.signedIn === "boolean") ai.signedIn = data.signedIn;
+  if (data.perAccount) ai.perAccount = data.perAccount;
   renderAiLimit();
 }
 async function loadAiLimit() {
   try {
-    const res = await fetch(`${API}/api/generate?device=${encodeURIComponent(DEVICE_ID)}`);
+    const res = await fetch(`${API}/api/generate?device=${encodeURIComponent(DEVICE_ID)}`, { headers: aiHeaders(false) });
     if (res.ok) setAiLimit(await res.json());
   } catch { /* offline: keep the last count */ }
 }
@@ -3641,7 +3651,7 @@ $("make-form").addEventListener("submit", async (e) => {
   try {
     const res = await fetch(API + "/api/generate", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: aiHeaders(true),
       body: JSON.stringify({ text, device: DEVICE_ID, files: ai.files.map((f) => ({ type: f.type, data: f.data, name: f.name })) }),
     });
     const data = await res.json().catch(() => ({}));

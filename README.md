@@ -127,6 +127,27 @@ calendar permission. Sign-in by itself (name, email, picture) doesn't need a rev
 The calendar is only read in the browser: event names and dates of tests you choose to
 track are saved, nothing else.
 
+### Protecting the AI credit balance
+
+Every AI study set goes through `api/_aiguard.js`, which checks all of these:
+
+| Protection | Default | Vercel setting to change it |
+|---|---|---|
+| **Dollar budget per day** (counts what each set really costs, so it holds even against fake devices, many networks or failing requests) | $0.50 | `AI_DAILY_BUDGET_USD` |
+| **Dollar budget per month** | $4.00 | `AI_MONTHLY_BUDGET_USD` |
+| Sets per signed-in account per day | 5 | `AI_DAILY_PER_ACCOUNT` |
+| Sets per guest device per day (guests can fake new devices, so they get fewer) | 3 | `AI_DAILY_PER_GUEST` |
+| Sets per network (IP address) per minute | 12 | `AI_PER_MINUTE_PER_NETWORK` |
+| Sets per network per day (a school shares one network) | 60 | `AI_DAILY_PER_NETWORK` |
+| Sets for the whole site per day | 300 | `AI_DAILY_TOTAL` |
+| Requests must come from this site or the Android app | on | `AI_ALLOWED_ORIGINS` adds more |
+| **Emergency off switch** | on | set `AI_ENABLED` to `false` and redeploy |
+
+The checks count first and undo if over, so many requests sent at the same moment can't
+slip through together. Each set's worst-case cost is reserved before calling Claude and
+settled to the real cost afterwards. Also set a monthly **spend limit** on the Billing page
+of the Claude Console as a final backstop, and keep auto-reload off.
+
 ## Install it as an app (Android)
 
 Cram Arcade is an installable web app: it has an app icon, opens full-screen, and works

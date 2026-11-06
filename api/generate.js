@@ -3,7 +3,8 @@
 // Runs on the server, so the API key is never sent to the browser.
 import { cors } from "./_cors.js";
 
-import { db } from "./_db.js";
+import { readSession } from "./_session.js";
+import { LIMITS, AI_ENABLED, costMicro, originAllowed, clientIp, whoIs, usageFor, reserve, settle } from "./_aiguard.js";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-haiku-5-5";
 const API = process.env.ANTHROPIC_API_URL || "https://api.anthropic.com";
@@ -11,36 +12,9 @@ const MAX_INPUT = 8000; // characters of notes we accept
 const MAX_FILES = 4;
 const MAX_UPLOAD_BYTES = 3_000_000; // all files together (Vercel accepts ~4.5 MB per request)
 const MAX_FILE_TOKENS = 60_000; // about 25 pages; longer files cost too much per set
+const MAX_OUTPUT_TOKENS = 3000; // a full set uses about 1,300-2,500
+const ATTEMPTS = 2;
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
-
-// Daily AI limits. Everyone sees their own count on the page.
-export const DAILY_PER_PERSON = Number(process.env.AI_DAILY_PER_PERSON || 5);
-const DAILY_PER_NETWORK = Number(process.env.AI_DAILY_PER_NETWORK || 60); // a whole school shares one network
-const DAILY_TOTAL = Number(process.env.AI_DAILY_TOTAL || 300); // protects the credit balance
-
-// Days roll over at midnight Toronto time.
-function today() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto" }).format(new Date());
-}
-function cleanId(v) {
-  return String(v || "").replace(/[^a-zA-Z0-9-]/g, "").slice(0, 64);
-}
-async function usage(device, ip) {
-  const counts = await db.hgetall(`ai:${today()}`);
-  const used = Number(counts[`dev:${device}`] || 0);
-  return {
-    used,
-    network: Number(counts[`ip:${ip}`] || 0),
-    total: Number(counts.all || 0),
-    limit: DAILY_PER_PERSON,
-    left: Math.max(0, DAILY_PER_PERSON - used),
-  };
-}
-async function count(device, ip, n) {
-  const key = `ai:${today()}`;
-  await Promise.all([db.hincrby(key, `dev:${device}`, n), db.hincrby(key, `ip:${ip}`, n), db.hincrby(key, "all", n)]);
-  await db.expire(key, 3 * 86400);
-}
 
 export function buildPrompt(text, fileCount = 0) {
   const source = fileCount
@@ -147,17 +121,29 @@ export function parseStudySet(raw) {
   return { title: String(data.title || "Study set"), cards, quiz };
 }
 
+const LIMIT_MESSAGES = {
+  person: (who) => who.signedIn
+    ? `You've used all ${who.limit} AI study sets for today. You get more at midnight, and "Type my own" has no limit.`
+    : `You've used all ${who.limit} AI study sets for today. Sign in to get ${LIMITS.perAccount} a day, or use "Type my own" (no limit).`,
+  minute: () => "Lots of AI study sets are being made from your network right now. Wait a minute and try again.",
+  network: () => "Your network has made a lot of AI study sets today. Try again tomorrow, or use \"Type my own\" for now.",
+  site: () => "Cram Arcade has made a lot of AI study sets today. Try again tomorrow, or use \"Type my own\" for now.",
+  budget: () => "Cram Arcade has made a lot of AI study sets today. Try again tomorrow, or use \"Type my own\" for now.",
+};
+
 export default async function handler(req, res) {
   if (cors(req, res)) return;
-  const ip = String(req.headers["x-forwarded-for"] || "unknown").split(",")[0].trim().slice(0, 64);
-  const device = cleanId(req.body?.device || req.query?.device) || `ip-${cleanId(ip)}`;
+  const session = readSession(req);
+  const who = whoIs(session, req.body?.device || req.query?.device);
 
   // GET: how many AI sets this person has left today.
   if (req.method === "GET") {
-    const u = await usage(device, ip).catch(() => null);
-    return res.status(200).json(u ? { limit: u.limit, used: u.used, left: u.left } : { limit: DAILY_PER_PERSON, used: 0, left: DAILY_PER_PERSON });
+    const u = await usageFor(who).catch(() => ({ limit: who.limit, used: 0, left: who.limit, signedIn: who.signedIn }));
+    return res.status(200).json({ ...u, perAccount: LIMITS.perAccount });
   }
   if (req.method !== "POST") return res.status(405).json({ error: "Use GET or POST." });
+  if (!originAllowed(req)) return res.status(403).json({ error: "AI study sets can only be made from Cram Arcade." });
+  if (!AI_ENABLED) return res.status(503).json({ error: "AI study sets are paused right now. You can still use \"Type my own\"." });
 
   const text = String(req.body?.text || "").trim();
   let blocks;
@@ -175,12 +161,14 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "The server is missing its API key." });
   }
 
-  const u = await usage(device, ip);
-  if (u.left <= 0) {
-    return res.status(429).json({ error: `You've used all ${DAILY_PER_PERSON} AI study sets for today. You get ${DAILY_PER_PERSON} more at midnight, and "Type my own" has no limit.`, limit: u.limit, used: u.used, left: 0 });
-  }
-  if (u.network >= DAILY_PER_NETWORK || u.total >= DAILY_TOTAL) {
-    return res.status(429).json({ error: "Cram Arcade has made a lot of AI study sets today. Try again tomorrow, or use \"Type my own\" for now.", limit: u.limit, used: u.used, left: u.left });
+  // Reserve the most this set could possibly cost before spending anything.
+  const ip = clientIp(req);
+  const worstInput = (blocks.length ? MAX_FILE_TOKENS : 0) + Math.ceil(text.length / 2) + 1500;
+  const worst = costMicro(worstInput * ATTEMPTS, MAX_OUTPUT_TOKENS * ATTEMPTS);
+  const r = await reserve(who, ip, worst).catch((err) => { console.error(err); return { reason: "site" }; });
+  if (!r.ticket) {
+    const u = await usageFor(who).catch(() => null);
+    return res.status(429).json({ error: LIMIT_MESSAGES[r.reason](who), ...(u || {}) });
   }
 
   const headers = {
@@ -189,40 +177,35 @@ export default async function handler(req, res) {
     "anthropic-version": "2023-06-01",
   };
   const messages = [{ role: "user", content: [...blocks, { type: "text", text: buildPrompt(text, blocks.length) }] }];
-
-  await count(device, ip, 1); // count it before calling the AI, so fast double-clicks can't skip the limit
+  let spent = 0; // what the AI calls really cost, in millionths of a dollar
+  let set = null;
   try {
-    // Long PDFs are expensive: check the size first (counting tokens is free).
+    // Long files are expensive: check their size first (counting tokens is free).
     if (blocks.length) {
       const check = await fetch(`${API}/v1/messages/count_tokens`, { method: "POST", headers, body: JSON.stringify({ model: MODEL, messages }) });
-      if (check.ok) {
-        const { input_tokens: tokens } = await check.json();
-        if (tokens > MAX_FILE_TOKENS) {
-          await count(device, ip, -1);
-          return res.status(400).json({ error: `That file is too long (about ${Math.round(tokens / 2500)} pages). Upload one chapter or a few pages at a time.` });
-        }
+      const tokens = check.ok ? (await check.json()).input_tokens : null;
+      if (!tokens || tokens > MAX_FILE_TOKENS) {
+        await settle(r.ticket, 0, { gotSet: false });
+        return res.status(400).json({ error: tokens ? `That file is too long (about ${Math.round(tokens / 2500)} pages). Upload one chapter or a few pages at a time.` : "Couldn't read that file. Try again, or save it as a PDF." });
       }
     }
     // Ask for the set; if the reply is unusable, try once more before giving up.
-    let set, data;
-    for (let attempt = 1; attempt <= 2 && !set; attempt++) {
+    for (let attempt = 1; attempt <= ATTEMPTS && !set; attempt++) {
       const response = await fetch(`${API}/v1/messages`, {
         method: "POST",
         headers,
         body: JSON.stringify({
-          model: MODEL, max_tokens: 4000, messages,
+          model: MODEL, max_tokens: MAX_OUTPUT_TOKENS, messages,
           tools: [STUDY_SET_TOOL], tool_choice: { type: "tool", name: "study_set" },
         }),
       });
       if (!response.ok) {
-        console.error("Anthropic API error", response.status, await response.text());
-        if (attempt === 2 || response.status < 500) {
-          await count(device, ip, -1);
-          return res.status(502).json({ error: "The AI service had a problem. Try again in a moment. (This one didn't count toward your limit.)" });
-        }
+        console.error("Anthropic API error", response.status, (await response.text()).slice(0, 300));
+        if (response.status < 500) break;
         continue;
       }
-      data = await response.json();
+      const data = await response.json();
+      spent += costMicro(data.usage?.input_tokens || 0, data.usage?.output_tokens || 0);
       try {
         const tool = (data.content || []).find((b) => b.type === "tool_use" && b.name === "study_set");
         set = parseStudySet(tool ? tool.input : (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join(""));
@@ -230,12 +213,14 @@ export default async function handler(req, res) {
         console.error(`Attempt ${attempt}: unusable reply (stop: ${data.stop_reason})`, err.message);
       }
     }
-    if (!set) throw new Error("No usable study set after 2 tries");
-    console.log("AI set", { input: data.usage?.input_tokens, output: data.usage?.output_tokens, files: blocks.length });
-    return res.status(200).json({ ...set, limit: u.limit, used: u.used + 1, left: Math.max(0, u.left - 1), usage: data.usage ? { input: data.usage.input_tokens, output: data.usage.output_tokens } : undefined });
   } catch (err) {
     console.error(err);
-    await count(device, ip, -1).catch(() => {});
-    return res.status(502).json({ error: "Couldn't build a study set from that. Try rewording it. (This one didn't count toward your limit.)" });
   }
+  await settle(r.ticket, spent, { gotSet: Boolean(set) });
+  console.log("AI set", { ok: Boolean(set), cost_usd: spent / 1_000_000, files: blocks.length, signedIn: who.signedIn });
+  const u = await usageFor(who).catch(() => null);
+  if (!set) {
+    return res.status(502).json({ error: "Couldn't build a study set from that. Try again, or reword it. (This one didn't count toward your limit.)", ...(u || {}) });
+  }
+  return res.status(200).json({ ...set, ...(u || {}) });
 }
