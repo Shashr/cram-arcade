@@ -22,7 +22,7 @@ const MS_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID;
 const GRAPH_ME_URL = process.env.GRAPH_ME_URL || "https://graph.microsoft.com/v1.0/me";
 // Google's official endpoint for checking a sign-in token. Can be swapped out for tests.
 const TOKENINFO_URL = process.env.GOOGLE_TOKENINFO_URL || "https://oauth2.googleapis.com/tokeninfo";
-const MAX_DATA_BYTES = 300_000;
+const MAX_DATA_BYTES = 900_000; // big AI sets (up to 40 cards) add up across 30 saved sets
 
 async function checkGoogleToken(credential) {
   const res = await fetch(`${TOKENINFO_URL}?id_token=${encodeURIComponent(credential)}`);

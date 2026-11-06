@@ -4,7 +4,7 @@
 import { cors } from "./_cors.js";
 
 import { readSession } from "./_session.js";
-import { LIMITS, AI_ENABLED, costMicro, originAllowed, clientIp, whoIs, usageFor, reserve, settle } from "./_aiguard.js";
+import { LIMITS, AI_ENABLED, costMicro, originAllowed, clientIp, whoIs, usageFor, reserve, settle, chargeExtra } from "./_aiguard.js";
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-haiku-5-5";
 const API = process.env.ANTHROPIC_API_URL || "https://api.anthropic.com";
@@ -12,21 +12,51 @@ const MAX_INPUT = 8000; // characters of notes we accept
 const MAX_FILES = 4;
 const MAX_UPLOAD_BYTES = 3_000_000; // all files together (Vercel accepts ~4.5 MB per request)
 const MAX_FILE_TOKENS = 60_000; // about 25 pages; longer files cost too much per set
-const MAX_OUTPUT_TOKENS = 3000; // a full set uses about 1,300-2,500
+// How big a set is depends on how much material there is (see setSize).
+const SET_SIZE = { minCards: 10, maxCards: 40, minQuiz: 6, maxQuiz: 20 };
+const PROMPT_TOKENS = 700; // our own instructions, not the student's material
+const MAX_OUTPUT_TOKENS = 7000; // enough for the biggest set (40 cards + 20 questions)
+
+// More material, more cards. A topic or a page of notes gets 10; it then grows quickly at
+// first and more slowly for long files (a long chapter repeats ideas), so about
+// 1 page -> 15 cards, 4 pages -> 25, and 15+ pages -> the 40-card maximum.
+export function setSize(materialTokens) {
+  const extra = Math.sqrt(Math.max(0, materialTokens - 1000)) * 0.158;
+  const cards = Math.max(SET_SIZE.minCards, Math.min(SET_SIZE.maxCards, Math.round(SET_SIZE.minCards + extra)));
+  const quiz = Math.max(SET_SIZE.minQuiz, Math.min(SET_SIZE.maxQuiz, Math.round(cards * 0.5)));
+  return { cards, quiz };
+}
+// Big files use more of the daily AI sets, since they cost more to read and make bigger sets.
+// Typed notes (8,000 characters max) always count as 1.
+export function setsForMaterial(materialTokens) {
+  if (materialTokens > 30_000) return 3; // about 13-25 pages
+  if (materialTokens > 10_000) return 2; // about 5-12 pages
+  return 1;
+}
+// Room for the reply: cards are short, quiz questions longer.
+function outputTokensFor({ cards, quiz }) {
+  return Math.min(MAX_OUTPUT_TOKENS, 600 + cards * 70 + quiz * 160);
+}
 const ATTEMPTS = 2;
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
-export function buildPrompt(text, fileCount = 0) {
+export function buildPrompt(text, fileCount = 0, size = { cards: 10, quiz: 6 }) {
   const source = fileCount
     ? `The student attached ${fileCount === 1 ? "a file" : `${fileCount} files`} (class notes, a lab report, a handout, slides or photos of notes)${text ? " and added the text below" : ""}.
 Create a study set from it. Use only facts from the files${text ? " and text" : ""}. If a photo is hard to read, use what you can read.`
     : `The student gave you either a topic or their own notes.
 Create a study set from it. If it is notes, use only facts from the notes.
 If it is a short topic, use accurate, well-established facts at a high-school level.`;
+  const coverage = size.cards > SET_SIZE.minCards
+    ? `
+This is a lot of material, so the set is bigger. Cover ALL of it: spread the cards and
+questions evenly from the beginning to the end, one main idea, term, formula or result per
+card, so nothing important is left out. Don't repeat the same fact on two cards.`
+    : "";
   return `You are a study coach. ${source}
-
+${coverage}
 Save it with the study_set tool.
-Rules: exactly 10 cards and 6 quiz questions. Card backs are short (under 20 words).
+Rules: exactly ${size.cards} cards and ${size.quiz} quiz questions. Card backs are short (under 20 words).
 Each quiz question has exactly 4 options, "answer" is the index (0-3) of the correct one,
 and the wrong options must be plausible. Card fronts must be unique.
 ${text ? `
@@ -179,17 +209,33 @@ export default async function handler(req, res) {
     "x-api-key": process.env.ANTHROPIC_API_KEY,
     "anthropic-version": "2023-06-01",
   };
-  const messages = [{ role: "user", content: [...blocks, { type: "text", text: buildPrompt(text, blocks.length) }] }];
+  // Size the set to the material: typed text is about 4 characters per token; files are
+  // measured exactly below. The prompt is rebuilt once we know.
+  let size = setSize(Math.ceil(text.length / 4));
+  const buildMessages = () => [{ role: "user", content: [...blocks, { type: "text", text: buildPrompt(text, blocks.length, size) }] }];
+  let messages = buildMessages();
   let spent = 0; // what the AI calls really cost, in millionths of a dollar
+  let setsUsed = 1; // big files count as 2 or 3
   let set = null;
   try {
     // Long files are expensive: check their size first (counting tokens is free).
     if (blocks.length) {
       const check = await fetch(`${API}/v1/messages/count_tokens`, { method: "POST", headers, body: JSON.stringify({ model: MODEL, messages }) });
       const tokens = check.ok ? (await check.json()).input_tokens : null;
+      if (tokens && tokens <= MAX_FILE_TOKENS) {
+        size = setSize(Math.max(0, tokens - PROMPT_TOKENS));
+        messages = buildMessages();
+      }
       if (!tokens || tokens > MAX_FILE_TOKENS) {
         await settle(r.ticket, 0, { gotSet: false });
         return res.status(400).json({ error: tokens ? `That file is too long (about ${Math.round(tokens / 2500)} pages). Upload one chapter or a few pages at a time.` : "Couldn't read that file. Try again, or save it as a PDF." });
+      }
+      setsUsed = setsForMaterial(tokens - PROMPT_TOKENS);
+      if (!(await chargeExtra(r.ticket, who, setsUsed - 1))) {
+        await settle(r.ticket, 0, { gotSet: false });
+        const u = await usageFor(who).catch(() => null);
+        const pages = Math.round((tokens - PROMPT_TOKENS) / 2500);
+        return res.status(429).json({ error: `That file is about ${pages} pages, so it uses ${setsUsed} of your AI sets, but you have ${u ? u.left : "fewer"} left today. Upload a shorter part (up to about 4 pages uses 1 set), or try again tomorrow.`, ...(u || {}) });
       }
     }
     // Ask for the set; if the reply is unusable, try once more before giving up.
@@ -198,7 +244,7 @@ export default async function handler(req, res) {
         method: "POST",
         headers,
         body: JSON.stringify({
-          model: MODEL, max_tokens: MAX_OUTPUT_TOKENS, messages,
+          model: MODEL, max_tokens: outputTokensFor(size), messages,
           tools: [STUDY_SET_TOOL], tool_choice: { type: "tool", name: "study_set" },
         }),
       });
@@ -220,10 +266,10 @@ export default async function handler(req, res) {
     console.error(err);
   }
   await settle(r.ticket, spent, { gotSet: Boolean(set) });
-  console.log("AI set", { ok: Boolean(set), cost_usd: spent / 1_000_000, files: blocks.length, signedIn: who.signedIn });
+  console.log("AI set", { ok: Boolean(set), cards: set?.cards.length, asked: size, cost_usd: spent / 1_000_000, files: blocks.length, signedIn: who.signedIn });
   const u = await usageFor(who).catch(() => null);
   if (!set) {
     return res.status(502).json({ error: "Couldn't build a study set from that. Try again, or reword it. (This one didn't count toward your limit.)", ...(u || {}) });
   }
-  return res.status(200).json({ ...set, ...(u || {}) });
+  return res.status(200).json({ ...set, ...(u || {}), setsUsed });
 }

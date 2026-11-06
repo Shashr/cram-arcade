@@ -121,6 +121,32 @@ export async function reserve(who, ip, worstCaseMicro) {
   }
 }
 
+// Big files count as more than one set. Takes the extra sets from the person's counters
+// (and the network and site counts) after the file has been measured. Returns false, and
+// takes nothing, if there aren't enough left.
+export async function chargeExtra(ticket, who, extra) {
+  if (extra <= 0) return true;
+  const taken = [];
+  const take = async (key, field, max) => {
+    const now = Number(await db.hincrby(key, field, extra));
+    taken.push([key, field, extra]);
+    return now <= max;
+  };
+  const counters = [
+    ...who.counters.map(([key, max]) => [ticket.day, key, max]),
+    [ticket.day, `ip:${ticket.ip}`, LIMITS.perNetworkDay],
+    [ticket.day, "all", LIMITS.perDay],
+  ];
+  for (const [key, field, max] of counters) {
+    if (!(await take(key, field, max))) {
+      await Promise.all(taken.map(([k, f, a]) => db.hincrby(k, f, -a))).catch(() => {});
+      return false;
+    }
+  }
+  ticket.undo.push(...taken); // refunded with the rest if no set comes out
+  return true;
+}
+
 // After the AI call: charge what it really cost. If no study set came out, the person and
 // network counts are given back, but the money spent stays counted against the budget.
 export async function settle(ticket, actualMicro, { gotSet }) {

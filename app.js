@@ -3792,7 +3792,7 @@ function renderAiLimit() {
   const guest = !ai.signedIn && ai.perAccount > ai.limit && !NATIVE;
   $("ai-limit-note").textContent = out
     ? `You've used today's ${ai.limit}. More at midnight.${guest ? ` Sign in to get ${ai.perAccount} a day.` : ""} You can still type your own set (no limit).`
-    : `${ai.signedIn ? `You get ${ai.limit} a day` : `Guests get ${ai.limit} a day${guest ? ` (sign in for ${ai.perAccount})` : ""}`}, and they refill at midnight. "Type my own" has no limit.`;
+    : `${ai.signedIn ? `You get ${ai.limit} a day` : `Guests get ${ai.limit} a day${guest ? ` (sign in for ${ai.perAccount})` : ""}`}, and they refill at midnight. Files over about 4 pages use 2 or 3. "Type my own" has no limit.`;
   $("make-btn").disabled = out;
   $("make-btn").textContent = out ? "No AI sets left today" : "Make my study set";
 }
@@ -3874,6 +3874,11 @@ function renderFiles() {
   for (const f of ai.files) {
     const li = el("li", "file-chip");
     li.append(el("span", "file-kind", f.kind), el("span", "file-name", f.name), el("span", "muted small", fileSize(f.size)));
+    // Word files are text, so we can tell roughly how many AI sets they'll use.
+    if (f.type === "text/plain") {
+      const sets = f.data.length / 4 > 30_000 ? 3 : f.data.length / 4 > 10_000 ? 2 : 1;
+      if (sets > 1) li.append(el("span", "file-cost", `big file: uses ${sets} AI sets`));
+    }
     const x = el("button", "file-remove", "×");
     x.type = "button";
     x.setAttribute("aria-label", `Remove ${f.name}`);
@@ -4001,7 +4006,7 @@ $("make-form").addEventListener("submit", async (e) => {
   btn.disabled = true;
   btn.textContent = "Making your set…";
   status.textContent = ai.files.length
-    ? "Claude is reading your file and writing your flashcards and quiz. This takes about 20 seconds."
+    ? "Claude is reading your file and writing your flashcards and quiz. Longer files get more cards, so this can take up to a minute."
     : "Claude is writing your flashcards and quiz. This takes about 10 seconds.";
   try {
     const res = await fetch(API + "/api/generate", {
@@ -4018,7 +4023,7 @@ $("make-form").addEventListener("submit", async (e) => {
     showView("cards");
     ai.files = [];
     renderFiles();
-    status.textContent = `Ready: ${data.cards.length} flashcards and ${data.quiz.length} quiz questions.`;
+    status.textContent = `Ready: ${data.cards.length} flashcards and ${data.quiz.length} quiz questions.${data.setsUsed > 1 ? ` This was a big file, so it used ${data.setsUsed} of your AI sets.` : ""}`;
     document.querySelector(".set").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (err) {
     status.classList.add("error");
