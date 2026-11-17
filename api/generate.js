@@ -17,11 +17,11 @@ const SET_SIZE = { minCards: 10, maxCards: 40, minQuiz: 6, maxQuiz: 20 };
 const PROMPT_TOKENS = 700; // our own instructions, not the student's material
 const MAX_OUTPUT_TOKENS = 7000; // enough for the biggest set (40 cards + 20 questions)
 
-// More material, more cards. A topic or a page of notes gets 10; it then grows quickly at
-// first and more slowly for long files (a long chapter repeats ideas), so about
-// 1 page -> 15 cards, 4 pages -> 25, and 15+ pages -> the 40-card maximum.
+// More material, more cards. A topic or a few lines of notes gets 10; it then grows quickly
+// at first and more slowly for long files (a long chapter repeats ideas), so about
+// a full paste box -> 17 cards, 2 pages -> 21, 5 pages -> 28, and 15+ pages -> the 40-card maximum.
 export function setSize(materialTokens) {
-  const extra = Math.sqrt(Math.max(0, materialTokens - 1000)) * 0.158;
+  const extra = Math.sqrt(Math.max(0, materialTokens - 150)) * 0.16;
   const cards = Math.max(SET_SIZE.minCards, Math.min(SET_SIZE.maxCards, Math.round(SET_SIZE.minCards + extra)));
   const quiz = Math.max(SET_SIZE.minQuiz, Math.min(SET_SIZE.maxQuiz, Math.round(cards * 0.5)));
   return { cards, quiz };
