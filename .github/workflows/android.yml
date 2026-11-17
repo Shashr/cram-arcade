@@ -53,6 +53,17 @@ jobs:
           sed -i -E "s/versionCode [0-9]+/versionCode ${BUILD_NUMBER}/; s/versionName \"[^\"]*\"/versionName \"1.0.${BUILD_NUMBER}\"/" android/app/build.gradle
           grep -E "versionCode|versionName" android/app/build.gradle
 
+      - name: Get the signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          # The signing key lives in a GitHub secret, never in the (public) repo.
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::Add the ANDROID_KEYSTORE_B64 secret (Settings > Secrets and variables > Actions) to build the app."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+
       - name: Build and sign the app
         run: |
           (cd android && ./gradlew assembleRelease --no-daemon)
@@ -61,7 +72,7 @@ jobs:
           test -n "$UNSIGNED"
           "$TOOLS/zipalign" -f -p 4 "$UNSIGNED" aligned.apk
           mkdir -p downloads
-          "$TOOLS/apksigner" sign --ks android-signing/sideload.keystore --ks-key-alias cramarcade \
+          "$TOOLS/apksigner" sign --ks "$RUNNER_TEMP/release.keystore" --ks-key-alias cramarcade \
             --ks-pass pass:android --key-pass pass:android --out downloads/cram-arcade.apk aligned.apk
           "$TOOLS/apksigner" verify --print-certs downloads/cram-arcade.apk
           printf '{"build":%s,"version":"1.0.%s","built":"%s"}\n' "$BUILD_NUMBER" "$BUILD_NUMBER" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > downloads/version.json

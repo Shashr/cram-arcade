@@ -1,57 +1,109 @@
 # Cram Arcade
 
-Paste your class notes or type a topic, and Cram Arcade uses AI (Claude) to turn it into:
+**Turn your notes into games.** Paste class notes, attach a PDF, Word file or photo, or just
+say a topic out loud, and Cram Arcade uses AI to build flashcards, a quiz, a matching game and
+a boss battle from it. Students earn arcade tickets for real studying, teachers see which
+questions their class keeps missing, and a calendar plans study sessions before each test.
 
-- **Flashcards** you can flip, shuffle, and sort into "got it" and "still learning"
-- **A multiple-choice quiz** with explanations for every answer
-- **A timed matching game** that tracks your best time
-- **A boss battle**: your study set becomes a boss with a health bar. Right answers deal
-  damage (fast answers are critical hits, streaks build combos), wrong answers cost you a
-  heart, and the boss gets enraged at half health. Questions you miss come back mid-fight
-  and are listed for review at the end.
+**Live site:** https://cram-arcade.vercel.app &nbsp;·&nbsp; **Android app:** download it from the site on any Android phone
+
+<p>
+  <img src="docs/screenshots/home.png" alt="Cram Arcade home page with upcoming tests and the study set maker" width="62%">
+  <img src="docs/screenshots/boss.png" alt="Boss battle against The Deadline, with energy attacks and a countdown" width="30%">
+</p>
+
+## Why I built it
+
+Studying from notes is boring, so most people re-read instead of testing themselves, even
+though self-testing works much better. Cram Arcade makes the testing part feel like an
+arcade: the more questions you actually answer, the more you win.
+
+## Features
+
+**Making a study set**
+- **AI study sets** from pasted notes, a topic, a **PDF**, a **Word document**, **photos** of
+  handwritten notes, or **voice**. The number of flashcards grows with how much material you
+  give it (10 for a short topic, up to 40 for a long chapter), so long documents aren't
+  squeezed into a few cards.
 - **Type your own set** for free (no AI): add cards one by one or paste a list
-  (`term - answer`, one per line; Quizlet exports work). A quiz is made from your cards.
-- **Saved sets**: every set you make is saved in your browser so you can come back to it.
-- Sound effects (with an on/off switch), confetti, and game-style animations.
-- **Tickets and the prize counter**: win arcade tickets in every game (most from boss
-  battles) and spend them on power-ups (extra heart, time freeze, 50/50) and nameplates.
-  Replaying the same set on the same day earns fewer tickets.
-- **Sign in with Microsoft or Google** to keep tickets, sets, tests and records on every device.
-- **Upcoming tests**: connect Outlook or Google Calendar (read-only) to find tests automatically, or add
-  them by hand. Each test gets a countdown, a linked study set, and a downloadable study plan
-  (a calendar file with an evening session for each of the days before the test).
-- **Calendar and study sessions**: a month calendar inside the app for tests and study
-  sessions. "Plan study sessions" adds an evening session before each test; a banner and a
-  pop-up remind you when the app is open (plus a browser notification if you allow it), and
-  finishing a session earns tickets. Sessions can also be added to your phone's calendar.
-- **Teacher mode (Classroom)**: a teacher creates a class from their study sets and shares a
-  6-character code. Students join with the code and their first name, and their quiz, boss
-  battle and flashcard results on the assigned sets show up on the teacher's dashboard, along
-  with **trouble spots**: the questions the class misses most. Uses the same database as crews.
-  The dashboard has an **Overview** (games played per day, students by best quiz score),
-  a **Students** table where each name opens that student's page (scores over time, the
-  questions they miss, recent games), and a **Questions** tab ranking every question by
-  how often it's answered wrong.
-- **Crew leaderboards**: start a crew, share the 5-letter code, and compete with friends
-  for the most tickets this week and all time.
+  (`term - answer`, one per line; Quizlet exports work).
+- Every set is saved, and syncs across devices when you sign in with Google.
 
-**Live site:** _add your Vercel link here_
+**Studying it**
+- **Flashcards** you can flip, shuffle and sort into "got it" and "still learning".
+- **Multiple-choice quiz** with an explanation for every answer.
+- **Timed matching game** that tracks your best time.
+- **Boss battles** with four random bosses, each beaten a different way. One of them,
+  *The Deadline*, is a race against the clock: right answers charge energy, and you choose
+  when to spend it on a Jab, Slam or Brain Blast (keys Q, W, E). Missed questions come back
+  mid-fight and are listed for review at the end.
 
-## How it works
+**Staying motivated**
+- **Tickets and a prize counter**: win tickets in every game and spend them on power-ups and
+  nameplates. Replaying the same set on the same day earns fewer.
+- **Upcoming tests and a calendar**: add tests by hand or find them in Google Calendar
+  (read-only). "Plan study sessions" adds an evening session before each test.
+- **Study sessions have to be earned**: a session only counts once you've answered
+  15 questions, so you can't just tick it off.
+- **Crew leaderboards**: share a 5-letter code and compete with friends each week.
+
+**For teachers (Classroom)**
+- A teacher makes a class from their study sets and shares a 6-character code. Students join
+  with their first name, and their results appear on a dashboard with an **Overview**, a page
+  per student, and a **Questions** tab ranking what the class gets wrong most.
+
+**Android app**
+- A real Android app (built with Capacitor) with phone notifications for study sessions and
+  tests, vibration in the games, and an in-app update notice. It's built automatically in the
+  cloud and downloadable straight from the website.
+
+<img src="docs/screenshots/quiz.png" alt="Quiz question on logic gates on a phone" width="30%">
+
+## How it's built
 
 ```
-Browser (index.html, app.js)  ──POST /api/generate──▶  Serverless function (api/generate.js)  ──▶  Claude API
-        ▲                                                         │
-        └──────────── JSON study set (cards + quiz) ◀──────────────┘
+Browser / Android app (index.html, app.js, style.css)
+        │  POST /api/generate  (notes + files)
+        ▼
+Vercel serverless functions (api/)  ──▶  Claude API (tool-use output, validated)
+        │
+        └──▶  Upstash Redis: accounts, crews, classes, AI usage counters
 ```
 
-- The front end is plain HTML, CSS, and JavaScript with no framework.
-- The API key lives only on the server (`api/generate.js`), so visitors can never see it.
-- The server asks Claude for a strict JSON format, then validates every flashcard and quiz
-  question before sending it to the browser (it rejects questions without exactly 4 options
-  or with an invalid answer index).
-- Basic abuse protection: input is capped at 8,000 characters and each visitor can make
-  10 study sets per hour.
+- **Front end:** plain HTML, CSS and JavaScript, no framework. Works offline as an installable
+  web app (`sw.js`, `manifest.webmanifest`).
+- **Back end:** Node.js serverless functions on Vercel. The AI key only exists on the server.
+- **AI:** Claude is asked to answer through a strict tool schema, and the server checks every
+  card and question (exactly 4 options, a valid answer) before anything reaches the student.
+  If the answer is malformed, it retries once.
+- **Sign-in:** Google Identity Services; the server issues its own signed (HMAC) session tokens.
+- **Android:** Capacitor 8, built and signed by GitHub Actions on every change
+  (`.github/workflows/android.yml`) and published to the site's `downloads/` folder.
+
+### Keeping the AI bill safe
+
+A public "make it with AI" button is an easy way to lose money, so every request goes
+through `api/_aiguard.js`, which checks all of these:
+
+| Protection | Default | Vercel setting to change it |
+|---|---|---|
+| **Dollar budget per day** (counts what each set really costs, so it holds even against fake devices, many networks or failing requests) | $0.50 | `AI_DAILY_BUDGET_USD` |
+| **Dollar budget per month** | $4.00 | `AI_MONTHLY_BUDGET_USD` |
+| Sets per signed-in account per day | 5 | `AI_DAILY_PER_ACCOUNT` |
+| Sets per guest device per day (guests can fake new devices, so they get fewer) | 3 | `AI_DAILY_PER_GUEST` |
+| Sets per network (IP address) per minute | 12 | `AI_PER_MINUTE_PER_NETWORK` |
+| Sets per network per day (a school shares one network) | 60 | `AI_DAILY_PER_NETWORK` |
+| Sets for the whole site per day | 300 | `AI_DAILY_TOTAL` |
+| Requests must come from this site or the Android app | on | `AI_ALLOWED_ORIGINS` adds more |
+| **Emergency off switch** | on | set `AI_ENABLED` to `false` and redeploy |
+
+The checks count first and undo if over, so many requests sent at the same moment can't
+slip through together. Each set's worst-case cost is reserved before calling Claude and
+settled to the real cost afterwards. Also set a monthly **spend limit** on the Billing page
+of the Claude Console as a final backstop, and keep auto-reload off.
+
+I tested it by attacking it: 50 requests sent at the same moment, 200 fake devices, requests
+from other websites, and rotating devices while signed in. The limits held every time.
 
 ## Run it on your computer
 
@@ -60,13 +112,18 @@ Browser (index.html, app.js)  ──POST /api/generate──▶  Serverless func
 3. In a terminal in this folder, run `npm start`.
 4. Open http://localhost:3000
 
+Without a database, accounts, crews and classes run in **test mode** on your computer.
+
 ## Deploy
 
 The site is hosted on [Vercel](https://vercel.com). Vercel serves the static files and runs
-the files in `api/` as serverless functions. The API key is stored as the environment
-variable `ANTHROPIC_API_KEY` in the Vercel project settings.
+the files in `api/` as serverless functions. Secrets (`ANTHROPIC_API_KEY`, `SESSION_SECRET`,
+`GOOGLE_CLIENT_ID`) are environment variables in the Vercel project settings.
 
-### Turning on crew leaderboards online
+<details>
+<summary>Setup details: database, Google sign-in, Microsoft sign-in</summary>
+
+#### Turning on crew leaderboards online
 
 Crews need a small database so friends' scores are shared. Without one, the leaderboard
 runs in **test mode** (only on one computer, wiped when the server restarts).
@@ -80,28 +137,7 @@ runs in **test mode** (only on one computer, wiped when the server restarts).
 create the database on upstash.com directly. Scores come from players' browsers, so a
 determined friend could fake theirs; the server caps how many tickets one report can add.
 
-### Microsoft sign-in, Outlook and Teams
-
-Optional. Lets students and teachers sign in with their school Microsoft account and find
-tests in their Outlook calendar. "Share to Teams" and join links work without any setup.
-
-1. Go to the [Microsoft Entra admin center](https://entra.microsoft.com) (a free personal
-   Microsoft account works) and open **App registrations → New registration**.
-2. Name: "Cram Arcade". **Supported account types**: "Accounts in any organizational
-   directory and personal Microsoft accounts".
-3. **Redirect URI**: choose **Single-page application (SPA)** and enter
-   `http://localhost:3000/`. Later add your Vercel link too (like `https://cram-arcade.vercel.app/`)
-   under **Authentication**. It must be the SPA type, ending with `/`.
-4. **API permissions → Add a permission → Microsoft Graph → Delegated**: `User.Read`
-   (already there) and `Calendars.Read`.
-5. Copy the **Application (client) ID** from the Overview page into `.env` and Vercel as
-   `MICROSOFT_CLIENT_ID`, and set `SESSION_SECRET` (any long random text).
-
-**School accounts:** many school boards only allow apps their IT team has approved. If a
-student sees "Your school needs to approve Cram Arcade", a teacher can ask IT to grant
-admin consent for the app (they'll need the client ID). Personal accounts work right away.
-
-### Google sign-in and calendar
+#### Google sign-in and calendar
 
 Optional. Without it, everything still works on one device, and tests can be added by hand.
 
@@ -127,28 +163,30 @@ calendar permission. Sign-in by itself (name, email, picture) doesn't need a rev
 The calendar is only read in the browser: event names and dates of tests you choose to
 track are saved, nothing else.
 
-### Protecting the AI credit balance
+#### Microsoft sign-in (not turned on yet)
 
-Every AI study set goes through `api/_aiguard.js`, which checks all of these:
+Optional. Lets students and teachers sign in with their school Microsoft account and find
+tests in their Outlook calendar. "Share to Teams" and join links work without any setup.
 
-| Protection | Default | Vercel setting to change it |
-|---|---|---|
-| **Dollar budget per day** (counts what each set really costs, so it holds even against fake devices, many networks or failing requests) | $0.50 | `AI_DAILY_BUDGET_USD` |
-| **Dollar budget per month** | $4.00 | `AI_MONTHLY_BUDGET_USD` |
-| Sets per signed-in account per day | 5 | `AI_DAILY_PER_ACCOUNT` |
-| Sets per guest device per day (guests can fake new devices, so they get fewer) | 3 | `AI_DAILY_PER_GUEST` |
-| Sets per network (IP address) per minute | 12 | `AI_PER_MINUTE_PER_NETWORK` |
-| Sets per network per day (a school shares one network) | 60 | `AI_DAILY_PER_NETWORK` |
-| Sets for the whole site per day | 300 | `AI_DAILY_TOTAL` |
-| Requests must come from this site or the Android app | on | `AI_ALLOWED_ORIGINS` adds more |
-| **Emergency off switch** | on | set `AI_ENABLED` to `false` and redeploy |
+1. Go to the [Microsoft Entra admin center](https://entra.microsoft.com) (a free personal
+   Microsoft account works) and open **App registrations → New registration**.
+2. Name: "Cram Arcade". **Supported account types**: "Accounts in any organizational
+   directory and personal Microsoft accounts".
+3. **Redirect URI**: choose **Single-page application (SPA)** and enter
+   `http://localhost:3000/`. Later add your Vercel link too (like `https://cram-arcade.vercel.app/`)
+   under **Authentication**. It must be the SPA type, ending with `/`.
+4. **API permissions → Add a permission → Microsoft Graph → Delegated**: `User.Read`
+   (already there) and `Calendars.Read`.
+5. Copy the **Application (client) ID** from the Overview page into `.env` and Vercel as
+   `MICROSOFT_CLIENT_ID`, and set `SESSION_SECRET` (any long random text).
 
-The checks count first and undo if over, so many requests sent at the same moment can't
-slip through together. Each set's worst-case cost is reserved before calling Claude and
-settled to the real cost afterwards. Also set a monthly **spend limit** on the Billing page
-of the Claude Console as a final backstop, and keep auto-reload off.
+**School accounts:** many school boards only allow apps their IT team has approved. If a
+student sees "Your school needs to approve Cram Arcade", a teacher can ask IT to grant
+admin consent for the app (they'll need the client ID). Personal accounts work right away.
 
-## Install it as an app (Android)
+</details>
+
+## Install it as an app
 
 Cram Arcade is an installable web app: it has an app icon, opens full-screen, and works
 offline (study sets you've saved still play with no internet).
@@ -178,7 +216,8 @@ Signing in inside the app is coming next (Google blocks its web sign-in inside a
 Android app in the cloud (`.github/workflows/android.yml`) and saves it to
 `downloads/cram-arcade.apk`, which Vercel puts on the website. Android visitors see a
 **Get the app** card, and installed apps show an **Update** button when a newer build is
-out. No Android Studio needed. The signing key is in `android-signing/`.
+out. No Android Studio needed. The signing key is kept in a GitHub Actions secret
+(`ANDROID_KEYSTORE_B64`), never in the repo; see `android-signing/README.md`.
 
 **Building it yourself instead** (optional; needs [Node.js](https://nodejs.org) 22+ and
 [Android Studio](https://developer.android.com/studio)):
@@ -198,7 +237,7 @@ After changing `index.html`, `app.js` or `style.css`, run `npm run android` agai
 
 The source images for the icon and splash screen are in `assets/`.
 
-### Publishing on Google Play
+### Publishing on Google Play (later)
 
 These steps package the website version with PWABuilder. For the Capacitor app, build the
 `.aab` in Android Studio instead (**Build → Generate Signed App Bundle**) and skip steps 3–4.
@@ -218,15 +257,20 @@ These steps package the website version with PWABuilder. For the Capacitor app, 
    opted in for 14 days in a row** before going public. Classmates make great testers.
 7. **Apply for production** from the Dashboard. Google usually replies within a week.
 
-## What I learned / what's next
+## What's next
 
-_Write this part yourself: what was hard, what you'd change, features you want to add
-(for example: spaced repetition, saving sets, uploading PDFs)._
+- Google sign-in inside the Android app (Google blocks its web sign-in inside apps).
+- Microsoft sign-in for school accounts.
+- Spaced repetition, so cards you miss come back on the right day.
+- Publishing on Google Play.
 
 ## Credits
 
-Built with help from Claude (Anthropic) as a coding assistant.
+Designed and built by Shashank J Reddy, with Claude (Anthropic) as a coding assistant.
 
 ## License
 
-© 2026 Shashank J Reddy. All rights reserved. This code is not open source: it may not be copied, modified, distributed or sold without written permission. See [LICENSE](LICENSE), and the app's [Terms of Use](terms.html) and [Privacy Policy](privacy.html).
+© 2026 Shashank J Reddy. All rights reserved. This code is shared so it can be read and
+reviewed; it is not open source and may not be copied, modified, distributed or sold without
+written permission. See [LICENSE](LICENSE), and the app's [Terms of Use](terms.html) and
+[Privacy Policy](privacy.html).
