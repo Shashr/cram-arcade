@@ -107,7 +107,7 @@ from other websites, and rotating devices while signed in. The limits held every
 
 ## Run it on your computer
 
-1. Install [Node.js](https://nodejs.org) (version 18 or newer).
+1. Install [Node.js](https://nodejs.org) (version 22 or newer).
 2. Copy `.env.example` to a new file called `.env` and paste your Anthropic API key into it.
 3. In a terminal in this folder, run `npm start`.
 4. Open http://localhost:3000
