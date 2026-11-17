@@ -14,10 +14,7 @@ questions their class keeps missing, and a calendar plans study sessions before 
 
 ## Why I built it
 
-Studying from notes is boring, so most people re-read instead of testing themselves, even
-though self-testing works much better. Cram Arcade makes the testing part feel like an
-arcade: the more questions you actually answer, the more you win.
-
+Quizlet and Blooket are two of the most used study tools in my school. However, they are repetitive and boring, not to mention it takes a considerable amount of time to manually set up the flashcards by yourself. I built this app as a new, fun, and more time efficient way for students to study. This app is extremely interactive, which I found was one of the best ways to learn a concept fast.
 ## Features
 
 **Making a study set**
