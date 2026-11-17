@@ -14,8 +14,7 @@ questions their class keeps missing, and a calendar plans study sessions before 
 
 ## Why I built it
 
-Quizlet and Blooket are two of the most used study tools in my school. However, they are repetitive and boring, not to mention it takes a considerable amount of time to manually set up the flashcards by yourself. I built this app as a new, fun, and more time efficient way for students to study. This app is extremely interactive, which I found was one of the best ways to learn a concept fast.
-## Features
+Quizlet and Blooket are two of the most-used study tools at my school. However, they get repetitive and boring, and setting up flashcards by hand takes a lot of time. I built Cram Arcade as a faster and more fun way for students to study: you give it your notes, and it builds the cards, quiz and games for you. I made it as interactive as possible, because I’ve found that’s one of the best ways to learn a concept fast.
 
 **Making a study set**
 - **AI study sets** from pasted notes, a topic, a **PDF**, a **Word document**, **photos** of
