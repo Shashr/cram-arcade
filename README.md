@@ -16,6 +16,8 @@ questions their class keeps missing, and a calendar plans study sessions before 
 
 Quizlet and Blooket are two of the most-used study tools at my school. However, they get repetitive and boring, and setting up flashcards by hand takes a lot of time. I built Cram Arcade as a faster and more fun way for students to study: you give it your notes, and it builds the cards, quiz and games for you. I made it as interactive as possible, because I’ve found that’s one of the best ways to learn a concept fast.
 
+## Features
+
 **Making a study set**
 - **AI study sets** from pasted notes, a topic, a **PDF**, a **Word document**, **photos** of
   handwritten notes, or **voice**. The number of flashcards grows with how much material you
