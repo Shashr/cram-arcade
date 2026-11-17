@@ -5,7 +5,7 @@ say a topic out loud, and Cram Arcade uses AI to build flashcards, a quiz, a mat
 a boss battle from it. Students earn arcade tickets for real studying, teachers see which
 questions their class keeps missing, and a calendar plans study sessions before each test.
 
-**Live site:** https://cram-arcade.vercel.app &nbsp;·&nbsp; **Android app:** download it from the site on any Android phone
+**Try it now:** https://cram-arcade.vercel.app (works in any browser, no install or account needed) &nbsp;·&nbsp; **Android app:** download it from the site on any Android phone
 
 <p>
   <img src="docs/screenshots/home.png" alt="Cram Arcade home page with upcoming tests and the study set maker" width="62%">
@@ -105,7 +105,10 @@ of the Claude Console as a final backstop, and keep auto-reload off.
 I tested it by attacking it: 50 requests sent at the same moment, 200 fake devices, requests
 from other websites, and rotating devices while signed in. The limits held every time.
 
-## Run it on your computer
+## Run the code yourself (for developers)
+
+To just use Cram Arcade, open **https://cram-arcade.vercel.app**. Nothing to install.
+The steps below are only for someone who wants to run or change the code on their own computer.
 
 1. Install [Node.js](https://nodejs.org) (version 22 or newer).
 2. Copy `.env.example` to a new file called `.env` and paste your Anthropic API key into it.
