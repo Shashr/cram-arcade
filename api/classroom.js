@@ -56,6 +56,13 @@ function validPlayer(id) {
   return /^[a-zA-Z0-9-]{8,64}$/.test(String(id || ""));
 }
 
+// Removes one student's name and results from a class.
+async function removeStudentData(k, playerId) {
+  await Promise.all([db.hdel(k.students, playerId), db.hdel(k.progress, playerId), db.hdel(k.history, playerId)]);
+  const theirs = Object.keys(await db.hgetall(k.studentMissed)).filter((key) => key.startsWith(`${playerId}${SEP}`));
+  await Promise.all(theirs.map((key) => db.hdel(k.studentMissed, key)));
+}
+
 // Keep only the parts of a study set the games need, with sensible limits.
 function cleanSet(set) {
   if (!set || typeof set !== "object") return null;
@@ -183,6 +190,13 @@ export default async function handler(req, res) {
       return res.status(200).json(publicInfo(code, found));
     }
 
+    if (body.action === "leave") {
+      // A student leaving deletes their name and results from the class.
+      if (!validPlayer(body.playerId)) return res.status(400).json({ error: "Missing player id." });
+      await removeStudentData(k, body.playerId);
+      return res.status(200).json({ ok: true });
+    }
+
     if (body.action === "report") {
       if (!validPlayer(body.playerId)) return res.status(400).json({ error: "Missing player id." });
       const students = await db.hgetall(k.students);
@@ -271,11 +285,12 @@ export default async function handler(req, res) {
     }
     if (body.action === "removeStudent") {
       if (!validPlayer(body.playerId)) return res.status(400).json({ error: "Missing student." });
-      await db.hdel(k.students, body.playerId);
-      await db.hdel(k.progress, body.playerId);
-      await db.hdel(k.history, body.playerId);
-      const theirs = Object.keys(await db.hgetall(k.studentMissed)).filter((key) => key.startsWith(`${body.playerId}${SEP}`));
-      await Promise.all(theirs.map((key) => db.hdel(k.studentMissed, key)));
+      await removeStudentData(k, body.playerId);
+      return res.status(200).json({ ok: true });
+    }
+    if (body.action === "deleteClass") {
+      // Deletes the class and every student's name and results in it, for good.
+      await db.del(...Object.values(k));
       return res.status(200).json({ ok: true });
     }
 

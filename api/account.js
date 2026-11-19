@@ -8,6 +8,7 @@
 //        -> { session, profile, data }       session = our own signed token for later requests
 //   GET  (header Authorization: Bearer <session>)        -> { profile, data }
 //   POST { action: "save", data } (same header)          -> { ok, savedAt }
+//   POST { action: "delete" } (same header)              -> { ok }  deletes the account for good
 //
 // Setup (see README): MICROSOFT_CLIENT_ID and/or GOOGLE_CLIENT_ID, and SESSION_SECRET =
 // any long random text. We only use the player's name and email.
@@ -103,6 +104,16 @@ export default async function handler(req, res) {
       if (json.length > MAX_DATA_BYTES) return res.status(413).json({ error: "Too much data to save. Delete some old study sets." });
       await db.set(`${userKey(session.sub)}:data`, json);
       return res.status(200).json({ ok: true, savedAt: Date.now() });
+    }
+
+    if (body.action === "delete") {
+      const session = readSession(req);
+      if (!session) return res.status(401).json({ error: "Please sign in again." });
+      // Removes the profile (name, email, picture) and everything synced to the account.
+      // The AI usage counter for today stays until it expires on its own (within 3 days),
+      // so deleting and signing up again can't be used to reset the daily AI limit.
+      await db.del(`${userKey(session.sub)}:profile`, `${userKey(session.sub)}:data`);
+      return res.status(200).json({ ok: true });
     }
 
     return res.status(400).json({ error: "Unknown action." });

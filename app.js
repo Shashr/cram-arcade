@@ -659,6 +659,8 @@ function renderCrewBoard(body) {
   const leave = el("button", "btn btn-quiet", "Leave crew");
   leave.type = "button";
   leave.addEventListener("click", () => {
+    // Remove your nickname and scores from the crew's board too (best effort when offline).
+    crewApi({ action: "leave", code: player.crew.code, playerId: player.id }).catch(() => {});
     player.crew = null;
     player.pending = 0;
     player.pendingWins = 0;
@@ -888,6 +890,64 @@ async function signOut(expired = false) {
   location.reload();
 }
 
+// "Delete my account": removes everything about you from the database (your account,
+// your name and results in classes, your crew scores, and any classes you teach),
+// then clears this device back to a fresh guest.
+function deleteAccountBox() {
+  const box = el("div", "danger-zone");
+  const start = el("button", "link-btn danger-link", "Delete my account");
+  start.type = "button";
+  start.addEventListener("click", () => {
+    box.innerHTML = "";
+    const teaching = (player.teaching || []).length;
+    box.append(el("p", "small", "This deletes your account for good: your name, email, synced study sets, tickets and records, your results in any class, your crew scores"
+      + (teaching ? `, and the ${teaching === 1 ? "class" : `${teaching} classes`} you teach (with all their students' results)` : "") + ". It can't be undone."));
+    const row = el("div", "maker-row");
+    const yes = el("button", "btn btn-danger", "Delete everything");
+    yes.type = "button";
+    const no = el("button", "btn btn-quiet", "Keep my account");
+    no.type = "button";
+    no.addEventListener("click", () => renderAccount());
+    const status = el("p", "status");
+    yes.addEventListener("click", async () => {
+      yes.disabled = no.disabled = true;
+      status.className = "status";
+      status.textContent = "Deleting…";
+      clearTimeout(syncTimer);
+      const id = player.id;
+      // Classes and crews first (they use this device's player id), then the account.
+      const cleanup = [
+        ...(player.classes || []).map((c) => classApi({ action: "leave", code: c.code, playerId: id })),
+        ...(player.teaching || []).map((c) => classApi({ action: "deleteClass", code: c.code, teacherKey: c.key })),
+        player.crew ? crewApi({ action: "leave", code: player.crew.code, playerId: id }) : null,
+      ].filter(Boolean);
+      await Promise.allSettled(cleanup);
+      try {
+        await accountApi({ action: "delete" });
+      } catch (err) {
+        yes.disabled = no.disabled = false;
+        status.classList.add("error");
+        status.textContent = `${err.message} Nothing was deleted from your account yet, so try again.`;
+        return;
+      }
+      safeSet(SESSION_KEY, "");
+      safeSet("cram-profile", "null");
+      account.profile = null;
+      try { window.google?.accounts.id.disableAutoSelect(); } catch { /* ignore */ }
+      try {
+        for (const k of LOCAL_KEYS) localStorage.removeItem(k);
+        for (const k of Object.keys(localStorage)) if (k.startsWith("cram-best:") || k.startsWith("cram-boss:")) localStorage.removeItem(k);
+      } catch { /* storage blocked */ }
+      safeSet("cram-deleted", "yes");
+      location.reload();
+    });
+    row.append(yes, no);
+    box.append(row, status);
+  });
+  box.append(start);
+  return box;
+}
+
 // Official sign-in marks, used on the sign-in buttons and next to your name once signed in.
 const LOGOS = {
   microsoft: `<svg class="brand-logo" viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>`,
@@ -963,6 +1023,7 @@ async function renderAccount() {
     body.append(el("p", "muted small", "Signing out saves your progress to your account and clears it from this device."));
     row.append(sync, out);
     body.append(row);
+    body.append(deleteAccountBox());
     return;
   }
   if (NATIVE) {
@@ -1475,6 +1536,10 @@ function planSessions(test) {
   return added;
 }
 
+if (safeGet("cram-deleted") === "yes") {
+  safeSet("cram-deleted", "");
+  setTimeout(() => ticketToastText("Your account and everything in it has been deleted."), 300);
+}
 if (safeGet("cram-signed-out") === "yes") {
   safeSet("cram-signed-out", "");
   setTimeout(() => ticketToastText("Signed out. Your progress is saved to your account."), 300);
@@ -2051,6 +2116,8 @@ async function renderStudent(body) {
     const leave = el("button", "btn btn-quiet small-btn", "Leave class");
     leave.type = "button";
     leave.addEventListener("click", () => {
+      // Leaving deletes your name and results from the teacher's dashboard too.
+      classApi({ action: "leave", code: c.code, playerId: player.id }).catch(() => {});
       player.classes = player.classes.filter((x) => x.code !== c.code);
       savePlayer();
       renderClassroom();
@@ -2720,6 +2787,40 @@ function renderDashboard() {
   if (d.database === "test") {
     body.append(el("p", "muted small test-note", "Test mode: this class only lives on this computer until the server restarts. Connect the database when the site is online so students can join from their own devices."));
   }
+
+  // Deleting a class removes it and all student names and results, for good.
+  const danger = el("div", "danger-zone");
+  const del = el("button", "btn btn-quiet small-btn", "Delete this class");
+  del.type = "button";
+  del.addEventListener("click", () => {
+    danger.innerHTML = "";
+    danger.append(el("p", "small", `Delete ${d.className}? Every student's name and results are deleted for good, and the code stops working.`));
+    const row = el("div", "maker-row");
+    const yes = el("button", "btn btn-danger small-btn", "Delete class");
+    yes.type = "button";
+    const no = el("button", "btn btn-quiet small-btn", "Keep it");
+    no.type = "button";
+    no.addEventListener("click", () => renderDashboard());
+    yes.addEventListener("click", async () => {
+      yes.disabled = true;
+      try {
+        const mine = (player.teaching || []).find((c) => c.code === d.code);
+        await classApi({ action: "deleteClass", code: d.code, teacherKey: mine?.key });
+        player.teaching = player.teaching.filter((c) => c.code !== d.code);
+        savePlayer();
+        classUi.dashboard = null;
+        renderClassroom();
+        ticketToastText(`Deleted ${d.className}.`);
+      } catch (err) {
+        yes.disabled = false;
+        danger.append(el("p", "status error", err.message));
+      }
+    });
+    row.append(yes, no);
+    danger.append(row);
+  });
+  danger.append(del);
+  body.append(danger);
 }
 function alertLine(body, text) {
   body.append(el("p", "status error", text));

@@ -1137,3 +1137,9 @@ textarea:hover, .text-input:hover { border-color: var(--muted); }
   .attack span { font-size: 0.68rem; }
 }
 .file-cost { font-size: 0.75rem; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: var(--yellow); color: #1c1240; white-space: nowrap; }
+
+/* Delete my account / delete a class */
+.danger-zone { margin-top: 18px; padding-top: 14px; border-top: 2px dashed var(--muted); display: grid; gap: 8px; justify-items: start; }
+.danger-zone p { margin: 0; }
+.danger-link { color: var(--bad); font-size: 0.9rem; }
+.btn-danger { background: var(--bad); color: #fff; }

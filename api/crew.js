@@ -10,6 +10,7 @@
 //   POST { action: "join",   code, playerId, name, plate }     -> leaderboard
 //   POST { action: "score",  code, playerId, tickets, win }     -> leaderboard
 //   POST { action: "profile", code, playerId, name, plate }    -> leaderboard
+//   POST { action: "leave",  code, playerId }                  -> { ok } (removes you from the board)
 //
 // Scores come from the player's browser, so a determined friend could fake them.
 // The server caps each report and how often a player can report, which is fine
@@ -126,6 +127,12 @@ export default async function handler(req, res) {
     }
 
     const code = cleanCode(body.code);
+    if (action === "leave") {
+      // Leaving deletes your nickname and scores from the crew's leaderboard.
+      const k = keys(code);
+      await Promise.all([k.names, k.total, k.wins, k.week].map((key) => db.hdel(key, playerId)));
+      return res.status(200).json({ ok: true });
+    }
     if (code.length !== 5 || !(await db.exists(keys(code).meta))) {
       return res.status(404).json({ error: "No crew has that code. Check it and try again." });
     }

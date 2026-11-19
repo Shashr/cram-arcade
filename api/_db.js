@@ -41,6 +41,7 @@ export const db = REDIS_URL && REDIS_TOKEN ? {
   hdel: (key, field) => redis(["HDEL", key, field]),
   exists: async (key) => (await redis(["EXISTS", key])) === 1,
   expire: (key, seconds) => redis(["EXPIRE", key, seconds]),
+  del: (...keys) => redis(["DEL", ...keys]),
 } : {
   mode: "test",
   async get(key) { const v = memory.get(key); return typeof v === "string" ? v : null; },
@@ -56,4 +57,5 @@ export const db = REDIS_URL && REDIS_TOKEN ? {
   async hdel(key, field) { if (memory.get(key) instanceof Map) memory.get(key).delete(field); },
   async exists(key) { return memory.has(key); },
   async expire() {},
+  async del(...keys) { for (const k of keys) memory.delete(k); },
 };
