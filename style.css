@@ -1,4 +1,10 @@
 /* Cram Arcade © 2026 Shashank J Reddy. All rights reserved. Not licensed for reuse; see LICENSE. */
+/* Fonts are served from this site (not Google Fonts), so loading the app tells no one else
+   who is visiting. Both are SIL Open Font License; the licences are in fonts/. */
+@font-face { font-family: "Atkinson Hyperlegible"; src: url("fonts/atkinson-400.woff") format("woff"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Atkinson Hyperlegible"; src: url("fonts/atkinson-700.woff") format("woff"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Bungee"; src: url("fonts/bungee-400.woff") format("woff"); font-weight: 400; font-display: swap; }
+
 /* Cram Arcade
    Concept: a night at the arcade. The page background is arcade carpet, the logo is a
    lit-up marquee sign, and each game is a big colored tile, like a cabinet in a row.
@@ -291,7 +297,7 @@ main { display: grid; gap: 28px; padding-block: 20px 40px; }
 .board-rank.rank-3 { background: #f0a868; color: #1c1240; }
 .board-who { display: grid; gap: 2px; justify-items: start; min-width: 0; }
 .board-score { font-family: var(--sign); font-size: 1.2rem; font-variant-numeric: tabular-nums; }
-.chase { margin: 0 0 12px; font-weight: 700; color: var(--text); background: #fff4cf; color: #1c1240; padding: 10px 12px; border-radius: 12px; border-left: 6px solid var(--yellow); }
+.chase { margin: 0 0 12px; font-weight: 700; color: var(--text); background: #fff4cf; color: #1c1240; padding: 10px 12px; border-radius: 12px; border: 2px solid #1c1240; }
 .test-note { margin: 0 0 12px; }
 
 /* Account */
@@ -503,7 +509,7 @@ main { display: grid; gap: 28px; padding-block: 20px 40px; }
 #class-body > .switch { margin-bottom: 4px; }
 #class-body .sheet-sub { margin: 8px 0 0; }
 #class-body > .btn { justify-self: start; }
-.class-card { display: grid; gap: 10px; padding: 14px; background: var(--panel-2); border-radius: 12px; border-left: 8px solid var(--green); }
+.class-card { display: grid; gap: 10px; padding: 14px; background: var(--panel-2); border-radius: 12px; border: 2px solid color-mix(in srgb, var(--text) 18%, transparent); }
 .class-card > p { margin: 0; }
 .class-card-head { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
 .class-name { margin: 0; font-family: var(--sign); font-weight: 400; font-size: 1.15rem; overflow-wrap: anywhere; }
@@ -1143,3 +1149,69 @@ textarea:hover, .text-input:hover { border-color: var(--muted); }
 .danger-zone p { margin: 0; }
 .danger-link { color: var(--bad); font-size: 0.9rem; }
 .btn-danger { background: var(--bad); color: #fff; }
+
+/* Skip link: first thing a keyboard user reaches; hidden until focused */
+.skip-link { position: absolute; left: 12px; top: -60px; z-index: 100; padding: 10px 14px; border-radius: 10px; background: var(--yellow); color: #1c1240; font-weight: 700; text-decoration: none; }
+.skip-link:focus { top: 12px; }
+main:focus { outline: none; }
+.form-note { margin: 4px 0 0; }
+.form-note a { color: inherit; }
+
+/* ---------- Animation styles (all switch off with "reduce motion") ---------- */
+
+/* Split-flap ticket counter */
+.ticket-count strong { perspective: 300px; display: inline-flex; }
+.flap { display: inline-block; transform-origin: 50% 55%; backface-visibility: hidden; }
+.flap.flip { animation: flap 0.42s cubic-bezier(.3, 1.4, .5, 1) both; }
+@keyframes flap {
+  0% { transform: rotateX(90deg); filter: brightness(0.6); }
+  60% { transform: rotateX(-18deg); filter: none; }
+  100% { transform: none; }
+}
+
+/* Comic-book critical hit: halftone starburst behind the number */
+.dmg.crit { isolation: isolate; padding: 4px 10px; color: #ffffff; text-shadow: 3px 3px 0 #0d0726, -1px -1px 0 #0d0726, 1px -1px 0 #0d0726, -1px 1px 0 #0d0726; animation: crit-pop 1s ease-out forwards; }
+@keyframes crit-pop { 0% { transform: translateX(-50%) scale(0.4); opacity: 1; } 18% { transform: translateX(-50%) scale(1.15); } 30% { transform: translateX(-50%) scale(1); } 75% { opacity: 1; margin-top: -18px; } 100% { transform: translateX(-50%); opacity: 0; margin-top: -40px; } }
+.dmg.crit::before {
+  content: ""; position: absolute; inset: -22px -30px; z-index: -1;
+  background:
+    radial-gradient(circle, rgba(13, 7, 38, 0.55) 1.3px, transparent 1.8px) 0 0 / 7px 7px,
+    var(--red);
+  clip-path: polygon(50% 0, 61% 26%, 90% 10%, 76% 38%, 100% 50%, 76% 62%, 90% 90%, 61% 74%, 50% 100%, 39% 74%, 10% 90%, 24% 62%, 0 50%, 24% 38%, 10% 10%, 39% 26%);
+  animation: pow 1s cubic-bezier(.2, 1.6, .4, 1) forwards;
+}
+@keyframes pow { 0% { transform: scale(0.2) rotate(-20deg); } 25% { transform: scale(1.1) rotate(4deg); } 45%, 100% { transform: scale(1) rotate(0); } }
+
+/* Pixel-art break-apart when a boss is defeated */
+.pixel-layer { position: absolute; inset: 0; pointer-events: none; overflow: visible; z-index: 3; }
+.pixel { position: absolute; box-shadow: inset -2px -2px 0 rgba(0, 0, 0, 0.25); }
+
+/* Kinetic type: rank reveal */
+.score-big.kinetic { display: flex; justify-content: flex-start; align-items: baseline; gap: 0; }
+.k-letter { display: inline-block; white-space: pre; animation: k-drop 0.45s cubic-bezier(.3, 1.6, .5, 1) both; }
+.k-rank { display: inline-block; font-size: 1.6em; margin-left: 0.1em; animation: k-slam 0.6s 0.38s cubic-bezier(.2, 1.4, .4, 1) both; }
+@keyframes k-drop { from { transform: translateY(-60px) rotate(-12deg); opacity: 0; } }
+@keyframes k-slam { 0% { transform: scale(3.2) rotate(-14deg); opacity: 0; } 60% { transform: scale(0.88) rotate(3deg); opacity: 1; } 100% { transform: none; } }
+
+/* Retro VHS glitch on a loss */
+.boss-end.vhs { position: relative; overflow: hidden; }
+.boss-end.vhs::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.14) 0 2px, transparent 2px 4px);
+  animation: vhs-lines 1.1s steps(6) forwards;
+}
+.vhs-text { position: relative; animation: vhs-jitter 1s steps(8) both; }
+.vhs-text::before, .vhs-text::after {
+  content: attr(data-text); position: absolute; inset: 0; mix-blend-mode: screen; pointer-events: none;
+}
+.vhs-text::before { color: #ff2d55; animation: vhs-red 1s steps(8) forwards; }
+.vhs-text::after { color: #2de2ff; animation: vhs-blue 1s steps(8) forwards; }
+@keyframes vhs-jitter { 0% { transform: translateX(-14px) skewX(12deg); opacity: 0; } 20% { transform: translateX(10px); opacity: 1; } 40% { transform: translateX(-6px) skewX(-6deg); } 60% { transform: translateX(3px); } 100% { transform: none; } }
+@keyframes vhs-red { 0% { transform: translate(-6px, 2px); opacity: 0.9; } 70% { transform: translate(-2px, 0); opacity: 0.6; } 100% { transform: none; opacity: 0; } }
+@keyframes vhs-blue { 0% { transform: translate(6px, -2px); opacity: 0.9; } 70% { transform: translate(2px, 0); opacity: 0.6; } 100% { transform: none; opacity: 0; } }
+@keyframes vhs-lines { 0% { opacity: 1; transform: translateY(-8px); } 100% { opacity: 0.25; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .dmg.crit::before { opacity: 1; }
+  .vhs-text::before, .vhs-text::after { display: none; }
+}

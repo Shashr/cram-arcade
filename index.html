@@ -6,9 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Cram Arcade</title>
   <meta name="description" content="Turn your notes into flashcards, a quiz, a matching game, and a boss battle.">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bungee&display=swap">
+  <link rel="preload" href="fonts/bungee-400.woff" as="font" type="font/woff" crossorigin>
   <link rel="stylesheet" href="style.css">
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#2a1a63">
@@ -16,6 +14,7 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 </head>
 <body id="top">
+  <a class="skip-link" href="#main">Skip to main content</a>
   <header class="appbar">
     <div class="appbar-inner">
       <a class="brand" href="#top" aria-label="Cram Arcade, back to top">
@@ -134,7 +133,7 @@
     <div id="crew-body"></div>
   </dialog>
 
-  <main class="wrap">
+  <main class="wrap" id="main" tabindex="-1">
     <p class="hello">Turn your notes into games.</p>
     <div id="reminders" class="reminders" aria-live="polite"></div>
 
@@ -195,6 +194,7 @@
           <button id="make-btn" class="btn btn-primary" type="submit">Make my study set</button>
         </div>
         <p id="status" class="status" role="status"></p>
+        <p class="muted small form-note">Your notes and files are sent to Anthropic's Claude to make the set, and Cram Arcade doesn't keep them. Don't include passwords or private details. <a href="privacy.html">Privacy Policy</a></p>
       </form>
 
       <form id="own-form" class="maker" hidden>
@@ -230,8 +230,8 @@
 
     <section class="set" aria-labelledby="set-title">
       <div class="set-head">
-        <p class="set-kind" id="set-kind">Example set</p>
         <h2 id="set-title">Study set</h2>
+        <p class="set-kind" id="set-kind">Example set</p>
       </div>
 
       <nav class="games tabs" role="tablist" aria-label="Games">

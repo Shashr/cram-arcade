@@ -32,7 +32,8 @@ export const db = REDIS_URL && REDIS_TOKEN ? {
   set: (key, value) => redis(["SET", key, value]),
   async hgetall(key) {
     const flat = (await redis(["HGETALL", key])) || [];
-    const out = {};
+    // A plain object with no prototype, so a field named "__proto__" is just a field.
+    const out = Object.create(null);
     for (let i = 0; i < flat.length; i += 2) out[flat[i]] = flat[i + 1];
     return out;
   },
@@ -46,7 +47,7 @@ export const db = REDIS_URL && REDIS_TOKEN ? {
   mode: "test",
   async get(key) { const v = memory.get(key); return typeof v === "string" ? v : null; },
   async set(key, value) { memory.set(key, String(value)); },
-  async hgetall(key) { return memory.get(key) instanceof Map ? Object.fromEntries(memory.get(key)) : {}; },
+  async hgetall(key) { return Object.assign(Object.create(null), memory.get(key) instanceof Map ? Object.fromEntries(memory.get(key)) : {}); },
   async hset(key, field, value) { hash(key).set(field, String(value)); },
   async hincrby(key, field, n) {
     const h = hash(key);

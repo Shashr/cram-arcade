@@ -2,12 +2,13 @@
 // Service worker: lets Cram Arcade open and play without internet once it's been visited.
 // - The app's own files are saved ("cached") each time they load, for use offline.
 // - /api/ requests (AI sets, crews, classes, sign-in) and app downloads always go to the internet.
-// - Fonts are cached after the first visit.
+// - Fonts are this site's own files, so they're saved too.
 // Change VERSION whenever you want every phone to fetch fresh files right away.
-const VERSION = "cram-v4";
+const VERSION = "cram-v5";
 const APP_FILES = [
   "/", "/index.html", "/style.css", "/app.js", "/manifest.webmanifest",
   "/icons/icon-192.png", "/icons/icon-512.png", "/icons/maskable-512.png", "/icons/favicon-32.png",
+  "/fonts/atkinson-400.woff", "/fonts/atkinson-700.woff", "/fonts/bungee-400.woff",
 ];
 
 self.addEventListener("install", (event) => {
@@ -28,8 +29,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin === location.origin && (url.pathname.startsWith("/api/") || url.pathname.startsWith("/downloads/"))) return; // always online
 
-  const isFont = url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com";
-  if (url.origin !== location.origin && !isFont) return;
+  if (url.origin !== location.origin) return;
 
   // Online: always get the newest version (and save a copy). Offline: use the saved copy.
   event.respondWith(

@@ -13,7 +13,8 @@ await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 for (const f of files) await cp(path.join(root, f), path.join(out, f));
 await cp(path.join(root, "icons"), path.join(out, "icons"), { recursive: true });
+await cp(path.join(root, "fonts"), path.join(out, "fonts"), { recursive: true });
 // Which build this is, so the app can tell when a newer one is on the website.
 const build = Number(process.env.BUILD_NUMBER || 0);
 await writeFile(path.join(out, "version.json"), JSON.stringify({ build }) + "\n");
-console.log(`Copied ${files.length} files and icons/ into www/`);
+console.log(`Copied ${files.length} files plus icons/ and fonts/ into www/`);

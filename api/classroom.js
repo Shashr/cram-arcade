@@ -38,14 +38,26 @@ const keys = (code) => ({
 const SEP = "\u001f";
 const MAX_HISTORY = 200;
 
+// Removes control characters and invisible "format" characters (zero-width spaces, and
+// right-to-left overrides that can make text display differently from what it is).
 function clean(text, max) {
-  return String(text || "").replace(/[\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+  return String(text || "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\p{Cf}/gu, "").replace(/\s+/g, " ").trim().slice(0, max);
+}
+// Names people see (students, teachers, classes) are also normalized (NFKC), so look-alike
+// characters such as full-width letters become ordinary ones and can't fake another name.
+function cleanName(text, max) {
+  return clean(String(text || "").normalize("NFKC"), max);
 }
 function cleanCode(code) {
   return String(code || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
 }
 function hashKey(key) {
   return crypto.createHash("sha256").update(String(key)).digest("hex");
+}
+// Compares in constant time, so response timing can't reveal how much of a key matched.
+function sameHash(a, b) {
+  const x = Buffer.from(String(a)), y = Buffer.from(String(b || ""));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
 }
 function newCode() {
   let code = "";
@@ -101,7 +113,7 @@ async function loadClass(code) {
 }
 async function teacherClass(code, teacherKey) {
   const found = await loadClass(code);
-  if (!found || !teacherKey || hashKey(teacherKey) !== found.meta.keyHash) return null;
+  if (!found || !teacherKey || !sameHash(hashKey(teacherKey), found.meta.keyHash)) return null;
   return found;
 }
 function publicInfo(code, { meta, sets }) {
@@ -156,8 +168,8 @@ export default async function handler(req, res) {
     const body = req.body || {};
 
     if (body.action === "create") {
-      const name = clean(body.className, 60);
-      const teacher = clean(body.teacherName, 40);
+      const name = cleanName(body.className, 60);
+      const teacher = cleanName(body.teacherName, 40);
       if (!name || !teacher) return res.status(400).json({ error: "Add a class name and the name students call you." });
       const sets = (Array.isArray(body.sets) ? body.sets : []).map(cleanSet).filter(Boolean).slice(0, MAX_SETS);
       if (!sets.length) return res.status(400).json({ error: "Pick at least one study set (with 4 or more cards) to assign." });
@@ -178,7 +190,7 @@ export default async function handler(req, res) {
       const found = await loadClass(code);
       if (!found) return res.status(404).json({ error: "No class has that code. Check it with your teacher." });
       if (!validPlayer(body.playerId)) return res.status(400).json({ error: "Missing player id." });
-      const name = clean(body.name, 30);
+      const name = cleanName(body.name, 30);
       if (!name) return res.status(400).json({ error: "Type your name so your teacher knows it's you." });
       const students = await db.hgetall(k.students);
       if (!students[body.playerId] && Object.keys(students).length >= MAX_STUDENTS) {

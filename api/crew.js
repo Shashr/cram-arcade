@@ -42,7 +42,7 @@ const keys = (code) => ({
   week: `crew:${code}:week:${weekId()}`,
 });
 function cleanName(name) {
-  return String(name || "").replace(/[^\p{L}\p{N} _.'-]/gu, "").replace(/\s+/g, " ").trim().slice(0, 20);
+  return String(name || "").normalize("NFKC").replace(/[^\p{L}\p{N} _.'-]/gu, "").replace(/\s+/g, " ").trim().slice(0, 20);
 }
 function cleanCode(code) {
   return String(code || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5);
@@ -52,7 +52,7 @@ function validPlayer(id) {
 }
 function newCode() {
   let code = "";
-  for (let i = 0; i < 5; i++) code += CODE_LETTERS[Math.floor(Math.random() * CODE_LETTERS.length)];
+  for (let i = 0; i < 5; i++) code += CODE_LETTERS[crypto.randomInt(CODE_LETTERS.length)];
   return code;
 }
 async function touch(code) {

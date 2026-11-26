@@ -162,6 +162,38 @@ function sparks(container, count = 10, color = cssVar("--accent")) {
   }
 }
 
+// Pixel-art break-apart: the defeated boss shatters into square "pixels" that scatter and
+// fall in stepped, 8-bit style motion.
+function pixelBreak(node) {
+  if (reducedMotion() || !node) return;
+  const box = node.getBoundingClientRect();
+  const stage = node.parentElement;
+  const origin = stage.getBoundingClientRect();
+  const fills = [...node.querySelectorAll("[fill], .paper, .body, path, rect, circle")]
+    .map((e) => getComputedStyle(e).fill).filter((f) => f && f !== "none" && !/0, 0, 0, 0/.test(f));
+  const colors = fills.length ? fills : [cssVar("--red"), "#0d0726"];
+  const size = Math.max(8, Math.round(box.width / 9));
+  const layer = el("div", "pixel-layer");
+  layer.setAttribute("aria-hidden", "true");
+  stage.append(layer);
+  for (let y = 0; y < box.height; y += size) {
+    for (let x = 0; x < box.width; x += size) {
+      if (Math.random() < 0.35) continue;
+      const p = el("span", "pixel");
+      p.style.cssText = `left:${box.left - origin.left + x}px;top:${box.top - origin.top + y}px;width:${size}px;height:${size}px;background:${colors[(x + y) % colors.length]}`;
+      layer.append(p);
+      const dx = (x - box.width / 2) * (0.6 + Math.random());
+      const dy = -40 - Math.random() * 60;
+      p.animate([
+        { transform: "translate(0, 0)", opacity: 1 },
+        { transform: `translate(${dx * 0.5}px, ${dy}px)`, opacity: 1, offset: 0.4 },
+        { transform: `translate(${dx}px, ${box.height}px)`, opacity: 0 },
+      ], { duration: 900 + Math.random() * 300, easing: "steps(9, end)", fill: "forwards" });
+    }
+  }
+  setTimeout(() => layer.remove(), 1400);
+}
+
 // Restart a CSS animation class on an element.
 function replay(node, cls, ms) {
   node.classList.remove(cls);
@@ -375,8 +407,10 @@ const PLATES = [
 ];
 
 function newPlayerId() {
+  // Player and device ids work like passwords for crews and classes, so they come from the
+  // browser's secure random generator, never Math.random.
   if (crypto.randomUUID) return crypto.randomUUID();
-  return "p-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  return "p-" + Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 function loadPlayer() {
   let saved = {};
@@ -397,8 +431,25 @@ function savePlayer() {
 safeSet(PLAYER_KEY, JSON.stringify(player));
 
 function renderTickets() {
-  $("ticket-num").textContent = player.tickets;
+  flapTo($("ticket-num"), player.tickets);
   $("shop-tickets").textContent = player.tickets;
+}
+
+// Split-flap counter, like an arcade scoreboard: each digit that changes flips over.
+// The element's text is still just the number, so screen readers read it normally.
+function flapTo(node, value) {
+  const next = String(value);
+  const prev = node.dataset.value ?? next;
+  node.dataset.value = next;
+  const old = prev.padStart(next.length, " ");
+  node.replaceChildren(...[...next].map((ch, i) => {
+    const d = el("span", "flap", ch);
+    if (!reducedMotion() && ch !== old[old.length - next.length + i]) {
+      d.classList.add("flip");
+      d.style.animationDelay = `${(next.length - 1 - i) * 70}ms`; // ones digit first, like a real board
+    }
+    return d;
+  }));
 }
 
 // Repeat plays of the same set on the same day earn fewer tickets (100%, 50%, then 25%),
@@ -550,6 +601,7 @@ function crewForm() {
     <p>Start a crew and share its code with friends. Everyone's tickets go on one leaderboard, and it resets every Monday.</p>
     <label class="label" for="crew-name-me">Your nickname</label>
     <input id="crew-name-me" class="text-input" maxlength="20" autocomplete="nickname" placeholder="What your friends call you">
+    <p class="muted small form-note">Your nickname, nameplate and tickets show on the crew's leaderboard. Leaving the crew deletes them. <a href="privacy.html">Privacy Policy</a></p>
     <div class="crew-choices">
       <form class="crew-choice" id="crew-create">
         <h3 class="sheet-sub">Start a crew</h3>
@@ -1035,6 +1087,9 @@ async function renderAccount() {
   if (account.error) body.append(el("p", "status error", account.error));
   const buttons = el("div", "signin-buttons");
   body.append(buttons);
+  const consent = el("p", "muted small form-note");
+  consent.innerHTML = 'By signing in, you agree to the <a href="terms.html">Terms of Use</a>. We save your name, email, profile picture link and progress so they sync between devices. <a href="privacy.html">Privacy Policy</a>';
+  buttons.after(consent);
   if (config.microsoftClientId) {
     const ms = brandButton("microsoft", true);
     ms.addEventListener("click", () => microsoftLogin("signin"));
@@ -2145,7 +2200,7 @@ async function renderStudent(body) {
   const form = el("form", "class-form");
   form.innerHTML = `
     <h3 class="sheet-sub">${player.classes.length ? "Join another class" : "Join your class"}</h3>
-    <p class="muted small">Your teacher gives you a 6-character class code.</p>
+    <p class="muted small">Your teacher gives you a 6-character class code. Your teacher will see the first name you enter and your results on the sets they assign. <a href="privacy.html">Privacy Policy</a></p>
     <div class="cal-form-row">
       <input class="text-input code-input" id="class-code" maxlength="6" placeholder="Class code" aria-label="Class code" autocomplete="off">
       <input class="text-input" id="class-me" maxlength="30" placeholder="Your first name" aria-label="Your first name" autocomplete="given-name">
@@ -2906,7 +2961,10 @@ function loadSet(set, kind) {
   state.deckAwarded = false;
   state.classCode = set.classCode || null; // results from class sets go to the teacher
   $("set-title").textContent = set.title;
-  $("set-kind").textContent = kind === "class" ? `From ${set.className || "your class"}` : KIND_LABELS[kind] || "Study set";
+  // A plain line under the title says where the set came from and how big it is.
+  const source = kind === "class" ? `From ${set.className || "your class"}` : KIND_LABELS[kind] || "Study set";
+  const quizCount = (set.quiz || []).length;
+  $("set-kind").textContent = `${source}, with ${set.cards.length} flashcards${quizCount ? ` and ${quizCount} quiz questions` : ""}`;
   renderCard();
   startQuiz();
   newMatchRound();
@@ -3301,9 +3359,9 @@ function renderBossIntro(type) {
   body.innerHTML = `
     <div class="quiz-card boss-intro boss-${boss.next}">
       <div class="boss-stage small"><div class="boss-sprite idle">${BOSS_ART[boss.next]}</div></div>
-      <p class="eyebrow">Boss battle: ${state.set.title.length > 40 ? "this set" : "<span class='set-ref'></span>"}</p>
       <h3 class="boss-title"></h3>
       <p class="boss-tagline"></p>
+      <p class="muted small">Its questions come from ${state.set.title.length > 40 ? "this set" : "<span class='set-ref'></span>"}.</p>
       <p class="label">How to beat it</p>
       <ul class="rules">${t.rules.map((r) => `<li>${r}</li>`).join("")}</ul>
       <p class="muted">${best ? `Your fastest win against this boss: ${best.toFixed(1)} seconds.` : "You haven't beaten this boss yet."} On a keyboard, press 1–4 to answer${boss.next === "clock" ? " and Q, W, E to attack" : ""}.</p>
@@ -3512,6 +3570,7 @@ function useAttack(id) {
   updateBossHud();
   if (boss.hp === 0) {
     sprite.classList.add("defeated");
+    pixelBreak(sprite);
     boss.active = false;
     cancelAnimationFrame(boss.raf);
     $("boss-options")?.querySelectorAll(".option").forEach((b) => { b.disabled = true; });
@@ -3627,10 +3686,11 @@ function usePower(id) {
 }
 
 function showDamage(amount, crit, text) {
+  // Critical hits get a comic-book "POW" burst: a halftone starburst behind the number.
   const pop = el("span", crit ? "dmg crit" : "dmg", text || (crit ? `CRIT ${amount}` : `-${amount}`));
   pop.style.left = `${35 + Math.random() * 30}%`;
   $("dmg-layer").append(pop);
-  setTimeout(() => pop.remove(), 900);
+  setTimeout(() => pop.remove(), 1000);
 }
 
 function bossAnswer(choice) {
@@ -3657,6 +3717,7 @@ function bossAnswer(choice) {
   };
   const win = () => {
     sprite.classList.add("defeated");
+    pixelBreak(sprite);
     boss.active = false;
     boss.wait = setTimeout(() => endBoss(true), 1000);
   };
@@ -3806,7 +3867,22 @@ function endBoss(won) {
   if (won) { confetti(120); fx.play("win"); } else fx.play("lose");
   const card = el("div", `quiz-card boss-end boss-${type}`);
   card.append(el("p", "eyebrow", won ? `${bossName(type)} defeated` : `${bossName(type)} won this time`));
-  card.append(el("p", won ? `score-big rank-${rank}` : "score-big", won ? `Rank ${rank}` : "Try again"));
+  if (won) {
+    // Kinetic type: "Rank" drops in letter by letter, then the rank letter slams down.
+    const big = el("p", `score-big rank-${rank} kinetic`);
+    big.setAttribute("aria-label", `Rank ${rank}`);
+    [..."Rank "].forEach((ch, i) => { const s = el("span", "k-letter", ch); s.style.animationDelay = `${i * 60}ms`; s.setAttribute("aria-hidden", "true"); big.append(s); });
+    const letter = el("span", "k-rank", rank);
+    letter.setAttribute("aria-hidden", "true");
+    big.append(letter);
+    card.append(big);
+  } else {
+    // Retro VHS: the loss screen glitches in like a worn-out tape, then settles.
+    card.classList.add("vhs");
+    const big = el("p", "score-big vhs-text", "Try again");
+    big.dataset.text = "Try again";
+    card.append(big);
+  }
   const stats = el("div", "stats");
   const last = type === "clock"
     ? [`${Math.ceil(boss.clockLeft / 1000)}s`, "Time left"]

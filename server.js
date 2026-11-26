@@ -18,7 +18,14 @@ const apis = { "/api/generate": generate, "/api/crew": crew, "/api/account": acc
 const types = {
   ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml",
   ".png": "image/png", ".webmanifest": "application/manifest+json", ".json": "application/json",
+  ".woff": "font/woff", ".woff2": "font/woff2", ".txt": "text/plain",
 };
+
+// The same security headers Vercel adds online (from vercel.json), so local testing
+// catches anything the Content Security Policy would block. (No https upgrade on localhost.)
+const vercelConfig = JSON.parse(await readFile(path.join(root, "vercel.json"), "utf8"));
+const securityHeaders = (vercelConfig.headers.find((h) => h.source === "/(.*)")?.headers || [])
+  .map(({ key, value }) => [key, key === "Content-Security-Policy" ? value.replace(/;\s*upgrade-insecure-requests/, "") : value]);
 
 const server = http.createServer(async (req, res) => {
   // Small helpers so the api/ functions work the same way they do on Vercel.
@@ -41,6 +48,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const content = await readFile(file);
     res.setHeader("content-type", types[path.extname(file)]);
+    for (const [key, value] of securityHeaders) res.setHeader(key, value);
     res.setHeader("cache-control", "no-store"); // always show the newest version while developing
     res.end(content);
   } catch {

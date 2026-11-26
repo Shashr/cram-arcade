@@ -103,6 +103,24 @@ of the Claude Console as a final backstop, and keep auto-reload off.
 I tested it by attacking it: 50 requests sent at the same moment, 200 fake devices, requests
 from other websites, and rotating devices while signed in. The limits held every time.
 
+### Other security and privacy protections
+
+I checked the app against a list of 20 attacks that have hit real companies and fixed the
+ones that apply to it:
+
+- **Security headers** on every page: a Content Security Policy (only this site's own
+  scripts can run), no framing by other sites (clickjacking), and no MIME sniffing.
+- **Unguessable codes:** crew codes, class codes, teacher keys and player IDs all come from a
+  cryptographic random generator, never `Math.random`.
+- **Constant-time key checks**, so response timing can't leak a teacher key.
+- **Look-alike names blocked:** names are Unicode-normalized and stripped of invisible and
+  right-to-left override characters, so nobody can impersonate a classmate on a leaderboard.
+- **No prototype pollution:** database results are read into objects with no prototype.
+- **API responses are never cached** (`Cache-Control: no-store`), and accounts are keyed to
+  Google's permanent user ID, not the email address.
+- **No third-party tracking:** fonts are self-hosted, there are no analytics or ads, and
+  students can delete their account, class results and crew scores from inside the app.
+
 ## Run the code yourself (for developers)
 
 To just use Cram Arcade, open **https://cram-arcade.vercel.app**. Nothing to install.
