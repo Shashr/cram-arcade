@@ -134,7 +134,19 @@
   </dialog>
 
   <main class="wrap" id="main" tabindex="-1">
-    <p class="hello">Turn your notes into games.</p>
+    <section class="hud" aria-label="Your player card">
+      <div class="hud-avatar" id="hud-avatar" aria-hidden="true">?</div>
+      <div class="hud-main">
+        <p class="hud-name" id="hud-name">Guest player</p>
+        <p class="hello">Turn your notes into games.</p>
+        <div class="hud-level">
+          <span class="hud-lvl" id="hud-lvl">Level 1</span>
+          <span class="xp-bar" role="progressbar" aria-labelledby="hud-xp-text" aria-valuemin="0" aria-valuemax="100" id="hud-xp-bar"><span class="xp-fill" id="hud-xp"></span></span>
+          <span class="hud-xp-text" id="hud-xp-text">0 of 100 tickets to level 2</span>
+        </div>
+      </div>
+      <button class="btn btn-play" id="hud-play" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12-7.5z"/></svg><span>Play</span></button>
+    </section>
     <div id="reminders" class="reminders" aria-live="polite"></div>
 
     <section id="tests" class="tests" aria-labelledby="tests-title">

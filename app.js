@@ -433,6 +433,42 @@ safeSet(PLAYER_KEY, JSON.stringify(player));
 function renderTickets() {
   flapTo($("ticket-num"), player.tickets);
   $("shop-tickets").textContent = player.tickets;
+  renderHud();
+}
+
+// Player card: name, avatar and a level that grows with every ticket you've ever earned.
+// Level L starts at 50 x L x (L - 1) tickets: level 2 at 100, 3 at 300, 4 at 600 ...
+const levelStart = (L) => 50 * L * (L - 1);
+function levelFor(earned) {
+  let L = 1;
+  while (earned >= levelStart(L + 1)) L++;
+  return L;
+}
+function renderHud() {
+  if (!$("hud-name")) return;
+  let profile = null;
+  try { profile = account.profile; } catch { /* account isn't set up yet on first load */ }
+  const name = profile?.name || player.name || "Guest player";
+  $("hud-name").textContent = name;
+  const avatar = $("hud-avatar");
+  const pic = profile?.picture;
+  if (pic && /^https:\/\//.test(pic)) {
+    if (avatar.querySelector("img")?.src !== pic) {
+      const img = document.createElement("img");
+      img.src = pic; img.alt = ""; img.referrerPolicy = "no-referrer";
+      avatar.replaceChildren(img);
+    }
+  } else {
+    avatar.textContent = name === "Guest player" ? "?" : name.slice(0, 1).toUpperCase();
+  }
+  const earned = player.earned || 0;
+  const L = levelFor(earned);
+  const from = levelStart(L), to = levelStart(L + 1);
+  const pct = Math.round(((earned - from) / (to - from)) * 100);
+  $("hud-lvl").textContent = `Level ${L}`;
+  $("hud-xp").style.width = `${pct}%`;
+  $("hud-xp-bar").setAttribute("aria-valuenow", String(pct));
+  $("hud-xp-text").textContent = `${to - earned} more tickets to level ${L + 1}`;
 }
 
 // Split-flap counter, like an arcade scoreboard: each digit that changes flips over.
@@ -1018,6 +1054,7 @@ function renderAccountChip() {
     chip.removeAttribute("aria-label");
   }
   chip.classList.toggle("signed-in", !!account.profile);
+  renderHud();
 }
 
 // A sign-in button with the provider's logo. Without setup it shows as a disabled preview.
@@ -2975,6 +3012,12 @@ function loadSet(set, kind) {
 document.querySelectorAll(".tab[data-view]").forEach((tab) => {
   tab.addEventListener("click", () => showView(tab.dataset.view));
 });
+// The big Play button: straight into a boss battle with the current set.
+document.getElementById("hud-play")?.addEventListener("click", () => {
+  $("tab-boss").click();
+  document.querySelector(".set").scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
+});
+
 function showView(view) {
   document.querySelectorAll(".tab[data-view]").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.view === view)));
   ["cards", "quiz", "match", "boss"].forEach((v) => { $("view-" + v).hidden = v !== view; });
