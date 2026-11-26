@@ -1,0 +1,6 @@
+# Keep line endings the same on Windows and Mac so changes don't show every line as edited.
+* text=auto eol=lf
+*.png binary
+*.woff binary
+*.woff2 binary
+*.apk binary

@@ -1,0 +1,9 @@
+{
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "files.exclude": { "android": true, "www": true },
+  "search.exclude": { "node_modules": true, "downloads": true, "android": true, "www": true }
+}

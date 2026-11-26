@@ -1,0 +1,8 @@
+{
+  // VS Code suggests these when you open the project.
+  "recommendations": [
+    "EditorConfig.EditorConfig",
+    "github.vscode-pull-request-github",
+    "ms-vsliveshare.vsliveshare"
+  ]
+}

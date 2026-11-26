@@ -123,6 +123,9 @@ ones that apply to it:
 
 ## Run the code yourself (for developers)
 
+**Helping build it?** Start with [CONTRIBUTING.md](CONTRIBUTING.md): setup in VS Code, free test mode
+(`npm run dev`), the one-command test (`npm test`) and how changes go live.
+
 To just use Cram Arcade, open **https://cram-arcade.vercel.app**. Nothing to install.
 The steps below are only for someone who wants to run or change the code on their own computer.
 

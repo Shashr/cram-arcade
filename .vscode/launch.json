@@ -1,0 +1,27 @@
+{
+  // Run buttons for VS Code's "Run and Debug" panel (Ctrl+Shift+D).
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Cram Arcade (free fake AI)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/tests/stack.mjs",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Run Cram Arcade (real AI, uses your .env key)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/server.js",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Run the smoke test",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/tests/smoke.mjs",
+      "console": "integratedTerminal"
+    }
+  ]
+}

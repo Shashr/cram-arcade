@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
+    "dev": "node tests/stack.mjs",
+    "test": "node tests/smoke.mjs",
     "build:www": "node scripts/build-www.mjs",
     "android:setup": "node scripts/build-www.mjs && npx cap add android && npx capacitor-assets generate --android && node scripts/android-extras.mjs && npx cap sync android",
     "android": "node scripts/build-www.mjs && npx cap sync android && npx cap open android"
@@ -20,7 +22,8 @@
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
-    "@capacitor/cli": "^8.0.0"
+    "@capacitor/cli": "^8.0.0",
+    "playwright": "^1.49.0"
   },
   "engines": {
     "node": ">=22"
